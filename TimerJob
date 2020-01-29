@@ -1,0 +1,343 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.SharePoint.Administration;
+using Microsoft.SharePoint;
+using System.IO;
+using Microsoft.Xrm.Sdk;
+using NTRLab.Ranepa.TimerJobs.Helpers;
+using System.Text.RegularExpressions;
+using System.IO.Compression;
+using ClosedXML.Excel;
+using System.Globalization;
+
+namespace NTRLab.Ranepa.TimerJobs
+{
+    class AttestationListJob : SPJobDefinition
+    {
+        public const string JobName = "Create attestation list";
+
+        public AttestationListJob() : base() { }
+
+
+        public AttestationListJob(SPWebApplication webApp) : base(JobName, webApp, null, SPJobLockType.Job)
+        {
+            this.Title = JobName;
+        }
+
+        public override void Execute(Guid targetInstanceId)
+        {
+            SPQuery spQuery = new SPQuery();
+
+            spQuery.Query = @"<Where>                                   
+                                <Eq>
+                                    <FieldRef Name='Done'/>
+                                    <Value Type='Boolean'>0</Value>
+                                </Eq>
+                            </Where>";
+            SPSecurity.RunWithElevatedPrivileges(delegate ()
+            {
+                string webUrl = WebApplication.GetResponseUri(SPUrlZone.Default, "/").ToString();
+                using (SPSite site = new SPSite(webUrl))
+                {
+                    using (SPWeb web = site.OpenWeb())
+                    {
+                        var list = web.Lists.TryGetList("AttestationJobList");
+                        if (list != null)
+                        {
+                            SPListItemCollection items = list.GetItems(spQuery);
+                            if (items.Count > 0)
+                            {
+                                foreach (SPListItem item in items)
+                                {
+                                    string[] departments = item["Departments"].ToString().Split(';');
+                                    string contId = item["Title"].ToString();
+                                    GenerateLists(departments, contId);
+                                    bool AllowUnsafe = web.AllowUnsafeUpdates;
+                                    web.AllowUnsafeUpdates = true;
+                                    web.GetFile(item.Url).Delete();
+                                    web.AllowUnsafeUpdates = AllowUnsafe;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        RanepaDataContext m_DataContext;
+        IOrganizationService service;
+
+        void GenerateLists(string[] departments, string contId)
+        {
+            
+            string currentDep = string.Empty;
+            string currentCont = string.Empty;
+            string errorInside = string.Empty;
+            string deparmentsString = string.Empty;
+            try
+            {
+                var path = Directory.CreateDirectory(string.Format(@"C:\Ranepa\AttestationsByDepartments\{0}\AttestationLists_{1}", contId, DateTime.Now.ToString("dd-MM-yyyy_hhmmss")));
+                string LogFileName = string.Format(@"{0}\log.txt", path.FullName);
+                using (StreamWriter sw = File.CreateText(LogFileName))
+                {
+                    sw.WriteLine("{0}   Начало выгрузки аттестационных листов", DateTime.Now.ToString());
+                }
+                var webApplication = Parent as SPWebApplication;
+                m_DataContext = JobRanepaContext.GetRanepaContext(webApplication);
+                service = m_DataContext.m_OrganizationService;
+                var allContacts = new List<Contact>();
+                var allContactsForReport = new List<Contact>();
+                int depDownloadsCount = 0;
+                foreach (string department in departments)
+                {
+                    currentDep = string.Empty;
+                    currentCont = string.Empty;
+                    if (!string.IsNullOrEmpty(department))
+                    {
+                        string departmentName = m_DataContext.Query<k2it_department>().Where(x => x.Id == Guid.Parse(department)).Select(a => a.k2it_name).First();
+                        currentDep = string.Format("{0}", departmentName);
+                        string regexSearch = new string(Path.GetInvalidFileNameChars()) + new string(Path.GetInvalidPathChars());
+                        Regex r = new Regex(string.Format("[{0}]", Regex.Escape(regexSearch)));
+                        departmentName = r.Replace(departmentName, "");
+                        deparmentsString += string.Format("{0}; ", departmentName);
+                        allContacts.Clear();
+                        allContacts.AddRange(m_DataContext.AdvancedSearchFetch(
+                                    string.Format(_departmentQuery, department)).Entities
+                                    .Select(le => (Contact)le));
+                        allContactsForReport.AddRange(allContacts);
+                        if (allContacts.Count > 0)
+                        {
+                            var dir = Directory.CreateDirectory(string.Format(@"{0}\{1}", path.FullName, departmentName));
+                            foreach (Contact con in allContacts)
+                            {
+                                string id = con.Id.ToString();
+                                string fio = con.FullName;
+                                currentCont = string.Format("{0} ({1})", con.Id, fio);
+                                try
+                                {
+                                    var file = GetReportXLS(con, "generateAttestationList_new", "аттестационный лист.xlsx");
+                                    string fileName = string.Format("{0} {1}", fio, getAliasedValue(con, "ac.k2it_positionnametext"));
+                                    string regexSearch2 = new string(Path.GetInvalidFileNameChars()) + new string(Path.GetInvalidPathChars());
+                                    Regex r2 = new Regex(string.Format("[{0}]", Regex.Escape(regexSearch2)));
+                                    fileName = r2.Replace(fileName, "");
+                                    string fullPathFile = string.Format("{0}\\{1}", dir.FullName, fileName);
+                                    if (fullPathFile.Length > 254)
+                                    {
+                                        fullPathFile = fullPathFile.Substring(0, 254);
+                                    }
+                                    using (FileStream fileStream = new FileStream(string.Format("{0}.xlsx", fullPathFile), FileMode.OpenOrCreate))
+                                    {
+                                        byte[] fileContent = Convert.FromBase64String(file);
+                                        fileStream.Write(fileContent, 0, fileContent.Length);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    string exLogString = string.Format("{0}      Ошибка при выгрузке. Сотрудник: {1}. Подразделение: {2}{3}{4}{3}", DateTime.Now.ToString(), currentCont, currentDep, Environment.NewLine, ex);
+                                    File.AppendAllText(LogFileName, exLogString);
+                                }
+                            }
+                            depDownloadsCount++;
+                        }
+                    }
+                }
+                var wb = new XLWorkbook();
+                wb = buildPublicEventsReport(allContactsForReport); ;
+                string excellName = "Spisok_sotrudnikov_po_podrazdel.xlsx";
+                using (FileStream fileStream = new FileStream(string.Format("{0}\\{1}.xlsx", path.FullName, excellName), FileMode.OpenOrCreate))
+                {
+                    wb.SaveAs(fileStream);
+                }
+                string finishLogString = string.Format("{0}   Выгружено {1} подразделений: {2}", DateTime.Now.ToString(), depDownloadsCount, deparmentsString);
+                File.AppendAllText(LogFileName, finishLogString);
+
+                string zipPath = string.Format(@"{0}.zip", path.FullName);
+                ZipFile.CreateFromDirectory(path.FullName, zipPath);
+                Directory.Delete(path.FullName, true);
+            }
+            catch (Exception ex)
+            {
+                string fileName = string.Format(@"C:\Ranepa\AttestationsByDepartments\Errorlog{0}.txt", contId);
+                using (StreamWriter sw = File.CreateText(fileName))
+                {
+                    sw.WriteLine("{0}     {1}", DateTime.Now.ToString(), ex);
+                    sw.WriteLine("{0}     Подразделение {1}", DateTime.Now.ToString(), currentDep);
+                    sw.WriteLine("{0}     Контакт {1}", DateTime.Now.ToString(), currentCont);
+                }
+            }
+        }
+
+        //Создание Excell отчета Аттестационный лист
+        private XLWorkbook buildPublicEventsReport(List<Contact> contactList)
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Список сотрудников");
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("Занимаемая должность");
+            ws.Cell(counter, 3).SetValue<string>("Дата прохождения действующей аттестации");
+            ws.Cell(counter, 4).SetValue<string>("КПК");
+            ws.Cell(counter, 5).SetValue<string>("КНК");
+            ws.Cell(counter, 6).SetValue<string>("КНПК (АУП)");
+            ws.Cell(counter, 7).SetValue<string>("Дата выгрузки");
+            ws.Cell(counter, 8).SetValue<string>("КПКнов");
+            ws.Cell(counter, 9).SetValue<string>("КНКнов ");
+            ws.Cell(counter, 10).SetValue<string>("КНПК (АУП)нов");
+            ws.Cell(counter, 11).SetValue<string>("Тип найма");
+            ws.Cell(counter, 12).Value = "Ставка";
+            ws.Cell(counter, 13).Value = "Подразделение";
+            ws.Cell(counter, 14).Value = "Корневое подразделение";
+            ws.Cell(counter, 15).Value = "Филиал";
+            ws.Range(counter, 1, counter, 15).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 60;
+            counter++;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            foreach (Contact cont in contactList)
+            {
+                ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "ac.k2it_positionnametext"));
+                ws.Cell(counter, 3).SetValue<string>(cont.ntrlab_attlist_download_date != null ? cont.ntrlab_attlist_download_date.Value.ToString() : "");
+                ws.Cell(counter, 4).SetValue<string>(cont.ntrlab_kpk_old != null ? double.Parse(cont.ntrlab_kpk_old.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) :"");
+                ws.Cell(counter, 5).SetValue<string>(cont.ntrlab_knk_old != null ? double.Parse(cont.ntrlab_knk_old.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                ws.Cell(counter, 6).SetValue<string>(cont.ntrlab_knpk_old != null ? double.Parse(cont.ntrlab_knpk_old.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                ws.Cell(counter, 7).SetValue<string>(cont.ntrlab_attlist_download_date_old != null ? cont.ntrlab_attlist_download_date_old.Value.ToString() : "");
+                ws.Cell(counter, 8).SetValue<string>(cont.ntrlab_kpk != null ? double.Parse(cont.ntrlab_kpk.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                ws.Cell(counter, 9).SetValue<string>(cont.ntrlab_knk != null ? double.Parse(cont.ntrlab_knk.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                ws.Cell(counter, 10).SetValue<string>(cont.ntrlab_knpk != null ? double.Parse(cont.ntrlab_knpk.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                ws.Cell(counter, 11).SetValue<string>(getFormattedValue(cont, "ac.k2it_employment_type"));
+                ws.Cell(counter, 12).SetValue<string>(getAliasedValue(cont, "ac.k2it_rate") != "" ? double.Parse(getAliasedValue(cont, "ac.k2it_rate")).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                ws.Cell(counter, 13).SetValue<string>(getAliasedValue(cont, "ag.k2it_name"));
+                ws.Cell(counter, 14).SetValue<string>(getAliasedValue(cont, "ax.k2it_name"));
+                ws.Cell(counter, 15).SetValue<string>(getAliasedValue(cont, "az.k2it_name"));
+                RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+            }
+            return wb;
+        }
+
+        private void RemoveDuplicates(ref int counter, ref IXLWorksheet ws, ref List<string> listForFindDupl)
+        {
+            string rowString = "";
+            foreach (var cell in ws.Row(counter).CellsUsed())
+            {
+                if (cell.Value != null)
+                {
+                    rowString += string.Format("{0}#", cell.Value.ToString());
+                }
+            }
+            if (listForFindDupl.Contains(rowString))
+            {
+                ws.Row(counter).Delete();
+            }
+            else
+            {
+                listForFindDupl.Add(rowString);
+                counter++;
+            }
+        }
+
+        private string getFormattedValue(Contact cont, string field)
+        {
+            return cont.FormattedValues.ContainsKey(field) && cont.FormattedValues[field] != null ? cont.FormattedValues[field] : "";
+        }
+
+
+        public static void Copy(string sourceDirectory, string targetDirectory)
+        {
+            var diSource = new DirectoryInfo(sourceDirectory);
+            var diTarget = new DirectoryInfo(targetDirectory);
+
+            CopyAll(diSource, diTarget);
+        }
+
+        public static void CopyAll(DirectoryInfo source, DirectoryInfo target)
+        {
+            Directory.CreateDirectory(target.FullName);
+
+            // Copy each file into the new directory.
+            foreach (FileInfo fi in source.GetFiles())
+            {
+                fi.CopyTo(Path.Combine(target.FullName, fi.Name), true);
+            }
+        }
+
+        private string GetReportXLS(Contact m_Contact, string a_ReportName, string a_FileName)
+        {
+            m_DataContext.Execute(a_ReportName, m_Contact.Id);
+
+            m_DataContext.LoadProperty(m_Contact, x => x.Contact_Annotation);
+
+            var report = m_Contact.Contact_Annotation.OrderByDescending(x => x.CreatedOn).FirstOrDefault(x => x.FileName == a_FileName);
+
+            if (report != null)
+            {
+                var caller = new AsyncDeleteEntity((name, id) =>
+                {
+                    try
+                    {
+                        using (var context = new RanepaDataContext())
+                        {
+                            context.Delete(name, id);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        SPDiagnosticsService.Local.WriteTrace(0, new SPDiagnosticsCategory(string.Format("Failed to delete entity ({0} {1}): ", name, id), TraceSeverity.Unexpected, EventSeverity.Error), TraceSeverity.Unexpected, ex.GetType().ToString() + ": " + ex.Message, ex.StackTrace);
+                    }
+                });
+
+                caller.BeginInvoke(Annotation.EntityLogicalName, report.Id, null, null);
+                return report.DocumentBody;
+            }
+            return null;
+        }
+
+        private string getAliasedValue(Contact cont, string field)
+        {
+            return cont.Attributes.ContainsKey(field) && ((AliasedValue)cont.Attributes[field]).Value != null ? ((AliasedValue)cont.Attributes[field]).Value.ToString() : "";
+        }
+
+        public delegate void AsyncDeleteEntity(string a_LogicalName, Guid a_ID);
+
+        private const string _departmentQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='ntrlab_kpk' />
+    <attribute name='ntrlab_knk' />
+    <attribute name='ntrlab_knpk' />
+    <attribute name='ntrlab_kpk_old' />
+    <attribute name='ntrlab_knk_old' />
+    <attribute name='ntrlab_knpk_old' />
+    <attribute name='ntrlab_attlist_download_date' />
+    <attribute name='ntrlab_attlist_download_date_old' />
+    <attribute name='contactid' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <attribute name='k2it_positionnametext' />
+        <attribute name='k2it_employment_type' />
+        <attribute name='k2it_rate' />
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+        <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_department' alias='ag' link-type='outer'>
+            <attribute name='k2it_name' />
+            <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_root_department' alias='ax' link-type='outer'>
+                <attribute name='k2it_name' />
+            </link-entity>
+            <link-entity name='k2it_branch' from='k2it_branchid' to='k2it_branch' alias='az' link-type='outer'>
+                <attribute name='k2it_name' />
+            </link-entity>
+        </link-entity>
+    </link-entity>
+  </entity>
+</fetch>";
+    }
+}

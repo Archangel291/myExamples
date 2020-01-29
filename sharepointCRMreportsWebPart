@@ -1,0 +1,2788 @@
+using System;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+using Microsoft.Xrm.Sdk;
+using System.Collections.Generic;
+using System.Linq;
+using K2IT.ranepa.Profiles.Controls.Data;
+using K2IT.ranepa.Profiles.Controls.Security;
+using System.IO;
+using System.IO.Compression;
+using ClosedXML.Excel;
+using System.Globalization;
+using System.Web;
+using System.Linq.Expressions;
+using Microsoft.SharePoint;
+
+namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
+{
+    public partial class wpReportsUserControl : RanepaUserControl
+    {
+        protected void Page_Load(object sender, EventArgs e)
+        {
+            if (!IsPostBack) // If page loads for first time
+            {
+                // Assign the Session["update"] with unique value
+                Session["update"] = Server.UrlEncode(System.DateTime.Now.ToString());
+            }
+        }
+
+        protected override void OnPreRender(EventArgs e)
+        {
+            if (m_DataContext == null)
+            {
+                m_DataContext = new RanepaDataContext();
+                m_SecurityContext = RanepaSecurityContext.Create(m_DataContext);
+                m_Bag = new Dictionary<string, RanepaBagItem>();
+                LoadWebPartData();
+            }
+            ViewState["update"] = Session["update"];
+        }
+        protected override void LoadWebPartData()
+        {
+            
+            //Получаем список всех подразделений где ответсвтенным является текущий пользователь и добавляем названия в дропдаун
+            var contact = m_DataContext.Query<Contact>().Where(x => x.k2it_login == RanepaSecurityContext.CurrentUserFormatedLogin).FirstOrDefault();
+            if (Directory.Exists(string.Format(@"C:\Ranepa\AttestationsByDepartments\{0}", contact.Id)))
+            {
+                Attestationslink.Visible = true;
+                Attestationslink.NavigateUrl = string.Format(@"http://localhost/AttestationLists/{0}", contact.Id);
+            }
+            if (ddlYearFrom.Visible)
+            {
+                for (int j = DateTime.Today.Year; j >= 1900; j--)
+                {
+                    string year = j.ToString();
+                    ddlYearFrom.Items.Add(new ListItem(year, year));
+                    ddlYearTo.Items.Add(new ListItem(year, year));
+                }
+            }
+            var ContactSet = new List<Contact>();
+            var managerCount = 0;
+            if (m_SecurityContext.InRole(RanepaSecurityRole.Admin))
+            {
+                //var managers = m_DataContext.Query<k2it_department_master>().Where(le => le.k2it_department != null);
+                var allRootDepartments = m_DataContext.Query<k2it_department>().Where(le => le.k2it_parent_department == null);
+                tPosition_Department.Nodes.Clear();
+                foreach (var rootDepartment in allRootDepartments)
+                {
+                    ListItem k2it_department_Name = new ListItem(rootDepartment.k2it_name, rootDepartment.Id.ToString());
+                    if (!RootDepartmentDropDownList.Items.Contains(k2it_department_Name))
+                    {
+                        RootDepartmentDropDownList.Items.Add(k2it_department_Name);
+                    }
+                    managerCount++;
+                }
+            }
+            else
+            {
+                var managers = m_DataContext.Query<k2it_department_master>().Where(le => le.k2it_department != null
+                && le.k2it_name == RanepaSecurityContext.CurrentUserFormatedLogin);
+                tPosition_Department.Nodes.Clear();
+                foreach (var manager in managers)
+                {
+                    ListItem k2it_department_Name = new ListItem(manager.k2it_department.Name, manager.k2it_department.Id.ToString());
+                    if (!RootDepartmentDropDownList.Items.Contains(k2it_department_Name))
+                    {
+                        RootDepartmentDropDownList.Items.Add(k2it_department_Name);
+                    }
+                    managerCount++;
+                }
+            }
+            
+            string previousPageUrl = string.Empty;
+            if (Request.UrlReferrer != null)
+            {
+                previousPageUrl = Request.UrlReferrer.ToString();
+            }
+            if (previousPageUrl.Contains("Pages/Profiles.aspx"))
+            {
+                
+                string selectedDepartment = Class.UsersSettings.GetValueFromSettings(contact.Id.ToString(), "OfficerDepartmentSelected");
+                if (!string.IsNullOrEmpty(selectedDepartment))
+                {
+                    RootDepartmentDropDownList.ClearSelection();
+                    RootDepartmentDropDownList.Items.FindByValue(selectedDepartment).Selected = true;
+                }
+            }
+            foreach (ListItem rootDepartmentItem in RootDepartmentDropDownList.Items)
+            {
+                if ((RootDepartmentDropDownList.SelectedValue == "All" || RootDepartmentDropDownList.SelectedValue == rootDepartmentItem.Value) && rootDepartmentItem.Value != "All")
+                {
+                    tPosition_Department.Nodes.Add(new TreeNode(rootDepartmentItem.Text, rootDepartmentItem.Value));
+                    Positions_BindDepartmentsTree(Guid.Parse(rootDepartmentItem.Value));
+                }
+            }
+            //Если у сотрудника нет в подчинении подразделений то в OnClientClick вставить функцию которая выдаст алерт
+            if (managerCount == 0)
+            {
+                btnCreateReport.OnClientClick = "alertHaveNoDepartment()";
+            }
+            //Если у сотрудника только одно подразделение, то убрать выбор "Все подразделения" с дроплиста
+            if (managerCount == 1)
+            {
+                RootDepartmentDropDownList.Items.Remove(RootDepartmentDropDownList.Items.FindByValue("All"));
+            }
+        }
+
+        protected void ChangeRootDepartment(object sender, EventArgs e)
+        {
+            if (m_DataContext == null)
+            {
+                m_DataContext = new RanepaDataContext();
+            }
+            var contact = m_DataContext.Query<Contact>().Where(x => x.k2it_login == RanepaSecurityContext.CurrentUserFormatedLogin).FirstOrDefault();
+            Class.UsersSettings.SaveOrUpdateSettings(contact.Id.ToString(), "OfficerDepartmentSelected", RootDepartmentDropDownList.SelectedValue);
+            tPosition_Department.Nodes.Clear();
+            foreach (ListItem rootDepartmentItem in RootDepartmentDropDownList.Items)
+            {
+                if ((RootDepartmentDropDownList.SelectedValue == "All" || RootDepartmentDropDownList.SelectedValue == rootDepartmentItem.Value) && rootDepartmentItem.Value != "All")
+                {
+                    tPosition_Department.Nodes.Add(new TreeNode(rootDepartmentItem.Text, rootDepartmentItem.Value));
+                    Positions_BindDepartmentsTree(Guid.Parse(rootDepartmentItem.Value));
+                }
+            }
+        }
+
+        void Positions_BindDepartmentsTree(Guid a_DepartmentID)
+        {
+            DepartmentTree_SelectValue(tPosition_Department, a_DepartmentID);
+        }
+
+        
+
+        IEnumerable<TreeNode> LoadDepartments(Guid? a_ParentDepartmentID)
+        {
+            return LoadDepartments(d => d.k2it_parent_department != null && d.k2it_parent_department.Id == a_ParentDepartmentID);
+        }
+
+        IEnumerable<TreeNode> LoadDepartments(Expression<Func<k2it_department, bool>> a_NodeFilter)
+        {
+            var nodes = m_DataContext.Query<k2it_department>().Where(a_NodeFilter);
+
+            var hasChildrenQuery = from child in m_DataContext.Query<k2it_department>()
+                                   join node in m_DataContext.Query<k2it_department>()
+                                   on child.k2it_parent_department.Id equals node.Id
+                                   select child.k2it_parent_department.Id;
+
+            var hasChildren = hasChildrenQuery.ToArray().Distinct();
+
+            return nodes.ToArray().Select(x => new TreeNode
+            {
+                Value = x.Id.ToString(),
+                Text = x.k2it_name,
+                PopulateOnDemand = hasChildren.Contains(x.Id),
+                SelectAction = TreeNodeSelectAction.SelectExpand,
+            }).OrderBy(le => le.Text);
+        }
+
+        void DepartmentTree_SelectValue(TreeView a_Tree, Guid a_DepartmentID)
+        {
+            var nodes = a_Tree.Nodes;
+            
+            
+            foreach (TreeNode node in nodes)
+            {
+                bool index = false;
+                if (node.Value == a_DepartmentID.ToString())
+                {
+                    DeparmentTree_SetNodes(node, a_DepartmentID);
+                }
+            }
+        }
+
+        void DeparmentTree_SetNodes(TreeNode node, Guid departmentID)
+        {
+            node.PopulateOnDemand = false;
+            node.Expanded = true;
+            node.SelectAction = TreeNodeSelectAction.None;
+
+            foreach (var child in LoadDepartments(departmentID))
+            {
+                child.SelectAction = TreeNodeSelectAction.None;
+                node.ChildNodes.Add(child);
+                if (child.PopulateOnDemand)
+                {
+                    DeparmentTree_SetNodes(child, Guid.Parse(child.Value));
+                }
+            }
+        }
+
+        //Функция при нажатии кнопки Сформировать
+        protected void CreateReport(object sender, EventArgs e)
+        {
+            if (Session["update"].ToString() == ViewState["update"].ToString())
+            {
+                string hiddenInpVal = HiddenInput.Value;
+                if (hiddenInpVal == "DownloadRatingList")
+                {
+                    DownloadZipRatingLists();
+                }
+                else if(hiddenInpVal == "attestation")
+                {
+                    CreateAttestationItem();
+                }
+                else
+                {
+                    DownloadReport(HiddenInput.Value);
+                }
+                Session["update"] = Server.UrlEncode(System.DateTime.Now.ToString());
+            }
+        }
+
+        void CreateAttestationItem()
+        {
+            SPSecurity.RunWithElevatedPrivileges(delegate ()
+            {
+                using (SPSite site = new SPSite(SPContext.Current.Web.Url))
+                {
+                    using (SPWeb web = site.OpenWeb())
+                    {
+                        bool AllowUnsafe = web.AllowUnsafeUpdates;
+                        web.AllowUnsafeUpdates = true;
+                        var list = web.Lists.TryGetList("AttestationJobList");
+                        if (list != null)
+                        {
+                            if (m_DataContext == null)
+                            {
+                                m_DataContext = new RanepaDataContext();
+                                m_SecurityContext = RanepaSecurityContext.Create(m_DataContext);
+                            }
+                            var contact = m_DataContext.Query<Contact>().Where(x => x.k2it_login == RanepaSecurityContext.CurrentUserFormatedLogin).FirstOrDefault();
+                            TreeNodeCollection departments = tPosition_Department.CheckedNodes;
+                            string departmentsStr = string.Empty;
+                            foreach(TreeNode department in departments)
+                            {
+                                departmentsStr += string.Format("{0};", department.Value);
+                            }
+                            SPListItem newItem = list.AddItem();
+                            newItem["Title"] = contact.Id.ToString();
+                            newItem["Departments"] = departmentsStr;
+                            newItem["Done"] = false;
+                            newItem.Update();
+                        }
+                        web.AllowUnsafeUpdates = AllowUnsafe;
+                    }
+                }
+            });
+        }
+
+        void DownloadZipRatingLists()
+        {
+            //string tempPath = @"C:\RatingListsByDepartments\Temp";
+            //if (Directory.Exists(tempPath))
+            //{
+                //Directory.Delete(tempPath, true);
+            //}
+            bool fileExists = false;
+            TreeNodeCollection departments = tPosition_Department.CheckedNodes;
+            var random = new Random();
+            int randomnumber1 = random.Next(0, 100000);
+            foreach (TreeNode department in departments)
+            {
+                string sourceDirectory = string.Format(@"C:\RatingListsByDepartments\{0}", department.Value);
+                if (Directory.Exists(sourceDirectory))
+                {
+                    
+                    string targetDirectory = string.Format(@"C:\RatingListsByDepartments\Temp\DownloadFolders{1}\{0}", department.Text, randomnumber1);
+                    Copy(sourceDirectory, targetDirectory);
+                    fileExists = true;
+                }
+            }
+            if (fileExists)
+            {
+                string startPath = string.Format(@"C:\RatingListsByDepartments\Temp\DownloadFolders{0}", randomnumber1);
+                int randomnumber2 = random.Next(0,100000);
+                string zipPath = string.Format(@"C:\RatingListsByDepartments\Temp\RatingLists{0}.zip", randomnumber2);
+
+                ZipFile.CreateFromDirectory(startPath, zipPath);
+                if (File.Exists(zipPath))
+                {
+                    System.IO.FileInfo file = new System.IO.FileInfo(zipPath);
+                    Response.ClearContent();
+                    Response.AddHeader("Content-Disposition", String.Format("attachment; filename={0}", file.Name));
+                    Response.AddHeader("Content-Length", file.Length.ToString());
+                    Response.ContentType = "application/zip";
+                    Response.Cookies.Add(new HttpCookie("dlc", cookieValue.Value));
+                    this.EnableViewState = false;
+                    Response.TransmitFile(file.FullName);
+                    Response.Flush();
+                    File.Delete(zipPath);
+                    Directory.Delete(startPath, true);
+                    Response.End();
+                }
+            }
+            else
+            {
+                Response.Write("<script>alert('Файлов по выбранным подразделениям не найдено');</script>");
+            }
+        }
+
+        public static void Copy(string sourceDirectory, string targetDirectory)
+        {
+            var diSource = new DirectoryInfo(sourceDirectory);
+            var diTarget = new DirectoryInfo(targetDirectory);
+
+            CopyAll(diSource, diTarget);
+        }
+
+        public static void CopyAll(DirectoryInfo source, DirectoryInfo target)
+        {
+            Directory.CreateDirectory(target.FullName);
+
+            // Copy each file into the new directory.
+            foreach (FileInfo fi in source.GetFiles())
+            {
+                fi.CopyTo(Path.Combine(target.FullName, fi.Name), true);
+            }
+        }
+
+
+        //Выгружаем отчет
+        void DownloadReport(string type)
+        {
+            try
+            {
+                //Построение файла
+                var contactList = GetContacts(type);
+                var wb = new XLWorkbook();
+                string excellName = "report.xlsx";
+                if (type == "depListReport")
+                {
+                    wb = buildDepListReport(contactList);
+                    excellName = "Spisok_sotrudnikov_po_podrazdel.xlsx";
+                }
+                if (type == "authorPublication")
+                {
+                    wb = buildAuthorPublicationReport(contactList);
+                    excellName = "Avtorstvo_publikaciy.xlsx";
+                }
+                if (type == "scientificGuidance")
+                {
+                    wb = buildScientificGuidanceReport(contactList);
+                    excellName = "Nauchnoe_rukovodstvo.xlsx";
+                }
+                if (type == "conferenceParticipation")
+                {
+                    wb = buildConferenceParticipationReport(contactList);
+                    excellName = "Uchastie_v_konferencii.xlsx";
+                }
+                if (type == "educationalRating")
+                {
+                    wb = buildEducationalRatingReport(contactList);
+                    excellName = "Pedagogicheskiy_reyting.xlsx";
+                }
+                if (type == "scientificRating")
+                {
+                    wb = buildScientificRatingReport(contactList);
+                    excellName = "Nauchniy_reyting.xlsx";
+                }
+                if (type == "publications")
+                {
+                    wb = buildPublicationsReport(contactList);
+                    excellName = "Publikacii.xlsx";
+                }
+                if (type == "training")
+                {
+                    wb = buildTrainingReport(contactList);
+                    excellName = "Povishenie_kvalifikacii.xlsx";
+                }
+                if (type == "participationProjects")
+                {
+                    wb = buildParticipationProjectsReport(contactList);
+                    excellName = "Uchastie_v_proektah.xlsx";
+                }
+                if (type == "authorshipRid")
+                {
+                    wb = buildAuthorshipRidReport(contactList);
+                    excellName = "Avtorstvo_RID.xlsx";
+                }
+                if (type == "awards")
+                {
+                    wb = buildAwardsReport(contactList);
+                    excellName = "Nagradi_Pochetnie_zvaniya.xlsx";
+                }
+                if (type == "professionalContests")
+                {
+                    wb = buildProfessionalContestsReport(contactList);
+                    excellName = "Uchastie_v_prof_konkursah.xlsx";
+                }
+                if (type == "publicEvents")
+                {
+                    wb = buildPublicEventsReport(contactList);
+                    excellName = "Uchastie_v_publichnih_meropr.xlsx";
+                }
+                //выгрузка дыннх в Excell
+                var ms = new MemoryStream();
+                wb.SaveAs(ms);
+                var arr = ms.ToArray();
+                using (var stream = new MemoryStream(arr))
+                {
+                    Response.Cache.SetCacheability(HttpCacheability.NoCache);
+                    Response.Clear();
+                    Response.ClearContent();
+                    Response.ClearHeaders();
+                    Response.Charset = "UTF-8";
+                    Response.AddHeader("Content-Disposition", "attachment; filename=" + excellName);
+                    Response.AddHeader("Content-Length", stream.Length.ToString());
+                    Response.Cookies.Add(new HttpCookie("dlc", cookieValue.Value));
+                    Response.ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                    stream.CopyTo(Response.OutputStream);     
+                }
+                Response.Flush();
+                Response.End();
+            }
+            catch (Exception ex)
+            {
+            }
+        }
+
+        //Получаем сотрудников подразделений, где текущий пользователь является ответственным
+        //Добавляем дополнительные условия в зависимости от типа отчета
+        private List<Contact> GetContacts(string type)
+        {
+            using (var context = new RanepaDataContext())
+            {
+                string additionalCondition = "";
+                string secondAdditionalCondition = "";
+                string mainAttribute = "";
+                string _query = _departmentQuery;
+                //для сотрдуников подразделений
+                if (type == "depListReport")
+                {
+                    _query = _depListReportQuery;
+                }
+                //для авторство публикаций
+                if (type == "authorPublication")
+                {
+                    
+                    string conditionFrom = calendarInputMYFrom.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='ntrlab_publication_date' operator='on-or-after' value='{0}' />",
+                                            DateTime.Parse(calendarInputMYFrom.Value).ToString("yyyy-MM-dd")) : "";
+                    string conditionTo = calendarInputMYTo.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='ntrlab_publication_date' operator='on-or-before' value='{0}' />",
+                                            DateTime.Parse(calendarInputMYTo.Value).ToString("yyyy-MM-dd")) : "";
+                    additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
+                    _query = _authorPublicationQuery;
+                }
+                //для наученое руководство
+                if (type == "scientificGuidance")
+                {
+                    string conditionFrom = calendarInputFrom.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='ntrlab_date' operator='on-or-after' value='{0}' />",
+                                            DateTime.Parse(calendarInputFrom.Value).ToString("yyyy-MM-dd")) : "";
+                    string conditionTo = calendarInputTo.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='ntrlab_date' operator='on-or-before' value='{0}' />",
+                                            DateTime.Parse(calendarInputTo.Value).ToString("yyyy-MM-dd")) : "";
+                    additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
+                    _query = _scientificGuidanceQuery;
+                }
+                //для участия в конференциях
+                if (type == "conferenceParticipation")
+                {
+                    string conditionFrom = calendarInputFrom.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='ntrlab_date' operator='on-or-after' value='{0}' />",
+                                           DateTime.Parse(calendarInputFrom.Value).ToString("yyyy-MM-dd")) : "";
+                    string conditionTo = calendarInputTo.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='ntrlab_date' operator='on-or-before' value='{0}' />",
+                                            DateTime.Parse(calendarInputTo.Value).ToString("yyyy-MM-dd")) : "";
+                    additionalCondition = string.Format(@"<link-entity name='k2it_conference_participation' from='k2it_teacher' to='contactid' alias='da'>
+                                                              <attribute name='k2it_type' />
+                                                              <attribute name='k2it_theme' />
+                                                              <attribute name='ntrlab_date' />
+                                                              <attribute name='k2it_affiliation' />
+                                                              <filter type='and'>
+                                                                {0}
+                                                                {1}
+                                                              </filter>
+                                                              <link-entity name='k2it_conference' from='k2it_conferenceid' to='k2it_conference' alias='dc' link-type='outer'>
+                                                                <attribute name='k2it_type' />
+                                                                <attribute name='k2it_name' />
+                                                                <attribute name='k2it_organizer' />
+                                                                <attribute name='k2it_place' />
+                                                                <attribute name='k2it_date_start' />
+                                                                <attribute name='k2it_date_end' />
+                                                                <attribute name='k2it_status' />
+                                                                <attribute name='k2it_is_foreign' />
+                                                                <attribute name='k2it_languages' />
+                                                                <attribute name='k2it_url' />
+                                                              </link-entity>
+                                                              <link-entity name='k2it_research' from='k2it_researchid' to='k2it_research' alias='db' link-type='outer'>
+                                                                <attribute name='k2it_name' />
+                                                                <attribute name='k2it_theme_number' />
+                                                                <attribute name='k2it_is_state_task' />
+                                                                <attribute name='k2it_academic_project' />
+                                                              </link-entity>
+                                                            </link-entity>", conditionFrom, conditionTo);
+
+                    secondAdditionalCondition = string.Format(@"<link-entity name='ntrlab_gaidar_forum_event_participation' from='ntrlab_teacher' to='contactid' alias='fa'>
+                                                                  <attribute name='ntrlab_type' />
+                                                                  <link-entity name='ntrlab_gaidar_forum_event' from='ntrlab_gaidar_forum_eventid' to='ntrlab_event' alias='fb'>
+                                                                    <attribute name='ntrlab_date' />
+                                                                    <attribute name='ntrlab_type' />
+                                                                    <attribute name='ntrlab_name' />
+                                                                    <filter type='and'>
+                                                                      {0}
+                                                                      {1}
+                                                                    </filter>
+                                                                    <link-entity name='ntrlab_gaidar_forum' from='ntrlab_gaidar_forumid' to='ntrlab_gaidar_forum' alias='fc' link-type='outer'>
+                                                                        <attribute name='ntrlab_type' />
+                                                                        <attribute name='ntrlab_foundation' />
+                                                                        <attribute name='ntrlab_name' />
+                                                                        <attribute name='ntrlab_location' />
+                                                                        <attribute name='ntrlab_date_start' />
+                                                                        <attribute name='ntrlab_date_end' />
+                                                                        <attribute name='ntrlab_status' />
+                                                                        <attribute name='ntrlab_language' />
+                                                                        <attribute name='ntrlab_url' />
+                                                                    </link-entity>
+                                                                  </link-entity>
+                                                                </link-entity>", conditionFrom, conditionTo);
+                    _query = _conferenceParticipationQuery;
+                }
+                //для Педагогический рейтинг
+                if (type == "educationalRating")
+                {
+                    _query = _educationalRatingQuery;
+                }
+                //для Научный рейтинг
+                if (type == "scientificRating")
+                {
+                    _query = _scientificRatingQuery;
+                }
+                //для Публикации
+                if (type == "publications")
+                {
+                    string conditionFrom = calendarInputMYFrom.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='ntrlab_publication_date' operator='on-or-after' value='{0}' />",
+                                            DateTime.Parse(calendarInputMYFrom.Value).ToString("yyyy-MM-dd")) : "";
+                    string conditionTo = calendarInputMYTo.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='ntrlab_publication_date' operator='on-or-before' value='{0}' />",
+                                            DateTime.Parse(calendarInputMYTo.Value).ToString("yyyy-MM-dd")) : "";
+                    additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
+                    _query = _publicationsQuery;
+                }
+                //для Повышение квалификации
+                if (type == "training")
+                {
+                    string conditionFrom = calendarInputFrom.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='k2it_finish_date' operator='on-or-after' value='{0}' />",
+                                            DateTime.Parse(calendarInputFrom.Value).ToString("yyyy-MM-dd")) : "";
+                    string conditionTo = calendarInputTo.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='k2it_finish_date' operator='on-or-before' value='{0}' />",
+                                            DateTime.Parse(calendarInputTo.Value).ToString("yyyy-MM-dd")) : "";
+                    additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
+                    _query = _trainingQuery;
+                }
+                //для Участие в проектах
+                if (type == "participationProjects")
+                {
+                    string conditionFrom = ddlYearFrom.SelectedValue != "All" ? string.Format(@"
+                                            <condition attribute='k2it_year_start' operator='ge' value='{0}' />",
+                                            ddlYearFrom.SelectedValue) : "";
+                    string conditionTo = ddlYearTo.SelectedValue != "All" ? string.Format(@"
+                                            <condition attribute='k2it_year_start' operator='le' value='{0}' />",
+                                            ddlYearTo.SelectedValue) : "";
+                    additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
+                    _query = _participationProjectsQuery;
+                }
+                //для Авторство РИД
+                if (type == "authorshipRid")
+                {
+                    string conditionFrom = calendarInputFrom.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='k2it_date' operator='on-or-after' value='{0}' />",
+                                            DateTime.Parse(calendarInputFrom.Value).ToString("yyyy-MM-dd")) : "";
+                    string conditionTo = calendarInputTo.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='k2it_date' operator='on-or-before' value='{0}' />",
+                                            DateTime.Parse(calendarInputTo.Value).ToString("yyyy-MM-dd")) : "";
+                    additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
+                    _query = _authorshipRidQuery;
+                }
+                //для Награды, почетный звания
+                if (type == "awards")
+                {
+                    string conditionFrom = ddlYearFrom.SelectedValue != "All" ? string.Format(@"
+                                            <condition attribute='k2it_year' operator='ge' value='{0}' />",
+                                            ddlYearFrom.SelectedValue) : "";
+                    string conditionTo = ddlYearTo.SelectedValue != "All" ? string.Format(@"
+                                            <condition attribute='k2it_year' operator='le' value='{0}' />",
+                                            ddlYearTo.SelectedValue) : "";
+                    additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
+                    _query = _awardsQuery;
+                }
+                //для Награды, почетный звания
+                if (type == "professionalContests")
+                {
+                    string conditionFrom = ddlYearFrom.SelectedValue != "All" ? string.Format(@"
+                                            <condition attribute='ntrlab_year' operator='ge' value='{0}' />",
+                                            ddlYearFrom.SelectedValue) : "";
+                    string conditionTo = ddlYearTo.SelectedValue != "All" ? string.Format(@"
+                                            <condition attribute='ntrlab_year' operator='le' value='{0}' />",
+                                            ddlYearTo.SelectedValue) : "";
+                    additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
+                    _query = _professionalContestsQuery;
+                }
+                //для Участие в публичных мероприятиях
+                if (type == "publicEvents")
+                {
+                    string conditionFrom = calendarInputFrom.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='ntrlab_date' operator='on-or-after' value='{0}' />",
+                                            DateTime.Parse(calendarInputFrom.Value).ToString("yyyy-MM-dd")) : "";
+                    string conditionTo = calendarInputTo.Value != String.Empty ? string.Format(@"
+                                            <condition attribute='ntrlab_date' operator='on-or-before' value='{0}' />",
+                                            DateTime.Parse(calendarInputTo.Value).ToString("yyyy-MM-dd")) : "";
+                    additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
+                    _query = _publicEventsQuery;
+                }
+                #region получение контактов
+                var ContactSet = new List<Contact>();
+                TreeNodeCollection departments = tPosition_Department.CheckedNodes;
+                foreach (TreeNode department in departments)
+                {
+                    try
+                    {   
+                        ContactSet.AddRange(context.AdvancedSearchFetch(
+                            string.Format(_query, department.Value, additionalCondition)).Entities
+                            .Select(le => (Contact)le));
+                        if (type == "conferenceParticipation")
+                        {
+                            ContactSet.AddRange(context.AdvancedSearchFetch(
+                            string.Format(_query, department.Value, secondAdditionalCondition)).Entities
+                            .Select(le => (Contact)le));
+                        }
+                    }
+                    catch
+                    { }
+                }
+
+                #endregion
+                return ContactSet.ToList();
+            }
+
+        }
+
+        //Создание Excell отчета Участие в публичных мероприятиях
+        private XLWorkbook buildPublicEventsReport(List<Contact> contactList)
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("Тема выступления");
+            ws.Cell(counter, 3).SetValue<string>("Дата выступления");
+            ws.Cell(counter, 4).SetValue<string>("Тип мероприятия");
+            ws.Cell(counter, 5).SetValue<string>("Название мероприятия");
+            ws.Cell(counter, 6).SetValue<string>("Статус мероприятия");
+            ws.Cell(counter, 7).SetValue<string>("Место проведения");
+            ws.Cell(counter + 1, 7).SetValue<string>("Страна");
+            ws.Cell(counter + 1, 8).SetValue<string>("Город ");
+            ws.Cell(counter, 9).SetValue<string>("Организатор");
+            ws.Cell(counter, 10).SetValue<string>("Ссылка на новость о мероприятии");
+            ws.Cell(counter, 11).Value = "Корневое подразделение \\ Подразделение";
+            
+            ws.Cell(counter, 13).Value = "Корневое подразделение\\Подразделение по внутреннему совместительству";
+            
+            ws.Cell(counter, 15).Value = "Корневое подразделение\\Подразделение по внешнему совместительству";
+            
+            ws.Cell(counter, 17).Value = "Корневое подразделение\\Подразделение почасовика";
+            
+            ws.Range(counter, 7, counter, 8).Merge();
+            for (int i = 1; i <= 6; i++)
+            {
+                ws.Range(counter, 1, counter + 1, 18).Column(i).Merge();
+            }
+            for (int i = 9; i <= 18; i++)
+            {
+                ws.Range(counter, 1, counter + 1, 18).Column(i).Merge();
+            }
+            ws.Range(counter, 11, counter+1, 12).Merge();
+            ws.Range(counter, 13, counter+1, 14).Merge();
+            ws.Range(counter, 15, counter+1, 16).Merge();
+            ws.Range(counter, 17, counter+1, 18).Merge();
+            ws.Range(counter, 1, counter+1, 18).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 60;
+            counter = counter + 2;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            using (var context = new RanepaDataContext())
+            {
+                foreach (Contact cont in contactList)
+                {
+                    ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_theme"));
+                    ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_date"));
+                    ws.Cell(counter, 4).SetValue<string>(getFormattedValue(cont, "dl.ntrlab_type"));
+                    ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_name"));
+                    ws.Cell(counter, 6).SetValue<string>(getFormattedValue(cont, "dl.ntrlab_status"));
+                    ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "dx.k2it_name"));
+                    ws.Cell(counter, 8).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_city"));
+                    ws.Cell(counter, 9).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_organizer"));
+                    ws.Cell(counter, 10).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_url"));
+                    string mainWorkPlaceDep = "";
+                    string mainWorkPlaceRootDep = "";
+                    string intenalCombDep = "";
+                    string intenalCombRootDep = "";
+                    string externalCombDep = "";
+                    string externalCombRootDep = "";
+                    string byHourDep = "";
+                    string byHourRootDep = "";
+                    var k2it_positionCollection = context.AdvancedSearchFetch(
+                                string.Format(_allContactDeparmentQuery, cont.ContactId)).Entities
+                                .Select(le => (k2it_position)le);
+                    foreach (k2it_position pos in k2it_positionCollection)
+                    {
+                        if (pos.FormattedValues.ContainsKey("k2it_employment_type") && pos.FormattedValues["k2it_employment_type"] != null)
+                        {
+                            string employment_type = pos.FormattedValues["k2it_employment_type"].ToString();
+                            string depName = pos.Attributes.ContainsKey("ba.k2it_name") && ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value.ToString()) : "";
+                            string rootDepName = pos.Attributes.ContainsKey("bb.k2it_name") && ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value.ToString()) : "";
+                            if (employment_type.Contains("Основное место работы"))
+                            {
+                                mainWorkPlaceDep += !mainWorkPlaceDep.Contains(depName) ? depName : "";
+                                mainWorkPlaceRootDep += !mainWorkPlaceRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внутренний совместитель"))
+                            {
+                                intenalCombDep += !intenalCombDep.Contains(depName) ? depName : "";
+                                intenalCombRootDep += !intenalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внешний совместитель"))
+                            {
+                                externalCombDep += !externalCombDep.Contains(depName) ? depName : "";
+                                externalCombRootDep += !externalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Почасовик"))
+                            {
+                                byHourDep += !byHourDep.Contains(depName) ? depName : "";
+                                byHourRootDep += !byHourRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                        }
+                    }
+                    ws.Cell(counter, 11).SetValue<string>(mainWorkPlaceRootDep);
+                    ws.Cell(counter, 12).SetValue<string>(mainWorkPlaceDep);
+                    ws.Cell(counter, 13).SetValue<string>(intenalCombRootDep);
+                    ws.Cell(counter, 14).SetValue<string>(intenalCombDep);
+                    ws.Cell(counter, 15).SetValue<string>(externalCombRootDep);
+                    ws.Cell(counter, 16).SetValue<string>(externalCombDep);
+                    ws.Cell(counter, 17).SetValue<string>(byHourRootDep);
+                    ws.Cell(counter, 18).SetValue<string>(byHourDep);
+                    RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                }
+            }
+            return wb;
+        }
+
+        //Создание Excell отчета Участие в проф конкурсах
+        private XLWorkbook buildProfessionalContestsReport(List<Contact> contactList)
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("Год участия");
+            ws.Cell(counter, 3).SetValue<string>("Уровень");
+            ws.Cell(counter, 4).SetValue<string>("Название конкурса");
+            ws.Cell(counter, 5).SetValue<string>("Учредитель конкурса");
+            ws.Cell(counter, 6).SetValue<string>("Страна");
+            ws.Cell(counter, 7).SetValue<string>("Результат");
+            ws.Cell(counter, 8).Value = "Корневое подразделение \\ Подразделение";
+            ws.Range(counter, 8, counter, 9).Merge();
+            ws.Cell(counter, 10).Value = "Корневое подразделение\\Подразделение по внутреннему совместительству";
+            ws.Range(counter, 10, counter, 11).Merge();
+            ws.Cell(counter, 12).Value = "Корневое подразделение\\Подразделение по внешнему совместительству";
+            ws.Range(counter, 12, counter, 13).Merge();
+            ws.Cell(counter, 14).Value = "Корневое подразделение\\Подразделение почасовика";
+            ws.Range(counter, 14, counter, 15).Merge();
+            ws.Range(counter, 1, counter, 15).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 60;
+            counter++;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            using (var context = new RanepaDataContext())
+            {
+                foreach (Contact cont in contactList)
+                {
+                    ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "dk.ntrlab_year"));
+                    ws.Cell(counter, 3).SetValue<string>(getFormattedValue(cont, "dk.ntrlab_status"));
+                    ws.Cell(counter, 4).SetValue<string>(getAliasedValue(cont, "dk.ntrlab_name"));
+                    ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "dk.ntrlab_founder"));
+                    ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "dx.k2it_name"));
+                    ws.Cell(counter, 7).SetValue<string>(getFormattedValue(cont, "dk.ntrlab_result"));
+                    string mainWorkPlaceDep = "";
+                    string mainWorkPlaceRootDep = "";
+                    string intenalCombDep = "";
+                    string intenalCombRootDep = "";
+                    string externalCombDep = "";
+                    string externalCombRootDep = "";
+                    string byHourDep = "";
+                    string byHourRootDep = "";
+                    var k2it_positionCollection = context.AdvancedSearchFetch(
+                                string.Format(_allContactDeparmentQuery, cont.ContactId)).Entities
+                                .Select(le => (k2it_position)le);
+                    foreach (k2it_position pos in k2it_positionCollection)
+                    {
+                        if (pos.FormattedValues.ContainsKey("k2it_employment_type") && pos.FormattedValues["k2it_employment_type"] != null)
+                        {
+                            string employment_type = pos.FormattedValues["k2it_employment_type"].ToString();
+                            string depName = pos.Attributes.ContainsKey("ba.k2it_name") && ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value.ToString()) : "";
+                            string rootDepName = pos.Attributes.ContainsKey("bb.k2it_name") && ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value.ToString()) : "";
+                            if (employment_type.Contains("Основное место работы"))
+                            {
+                                mainWorkPlaceDep += !mainWorkPlaceDep.Contains(depName) ? depName : "";
+                                mainWorkPlaceRootDep += !mainWorkPlaceRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внутренний совместитель"))
+                            {
+                                intenalCombDep += !intenalCombDep.Contains(depName) ? depName : "";
+                                intenalCombRootDep += !intenalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внешний совместитель"))
+                            {
+                                externalCombDep += !externalCombDep.Contains(depName) ? depName : "";
+                                externalCombRootDep += !externalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Почасовик"))
+                            {
+                                byHourDep += !byHourDep.Contains(depName) ? depName : "";
+                                byHourRootDep += !byHourRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                        }
+                    }
+                    ws.Cell(counter, 10).SetValue<string>(mainWorkPlaceRootDep);
+                    ws.Cell(counter, 11).SetValue<string>(mainWorkPlaceDep);
+                    ws.Cell(counter, 12).SetValue<string>(intenalCombRootDep);
+                    ws.Cell(counter, 13).SetValue<string>(intenalCombDep);
+                    ws.Cell(counter, 14).SetValue<string>(externalCombRootDep);
+                    ws.Cell(counter, 15).SetValue<string>(externalCombDep);
+                    ws.Cell(counter, 16).SetValue<string>(byHourRootDep);
+                    ws.Cell(counter, 17).SetValue<string>(byHourDep);
+                    RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                }
+            }
+            return wb;
+        }
+
+        //Создание Excell отчета Награды, почетные звания
+        private XLWorkbook buildAwardsReport(List<Contact> contactList)
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("Год награждения");
+            ws.Cell(counter, 3).SetValue<string>("Награда");
+            ws.Cell(counter, 4).SetValue<string>("Класс награды");
+            ws.Cell(counter, 5).SetValue<string>("Форма награды");
+            ws.Cell(counter, 6).SetValue<string>("Учредитель награды");
+            ws.Cell(counter, 7).SetValue<string>("Страна");
+            ws.Cell(counter, 8).SetValue<string>("Описание заслуг");
+            ws.Cell(counter, 9).SetValue<string>("Заслуги");
+            ws.Cell(counter, 10).Value = "Корневое подразделение \\ Подразделение";
+            ws.Range(counter, 10, counter, 11).Merge();
+            ws.Cell(counter, 12).Value = "Корневое подразделение\\Подразделение по внутреннему совместительству";
+            ws.Range(counter, 12, counter, 13).Merge();
+            ws.Cell(counter, 14).Value = "Корневое подразделение\\Подразделение по внешнему совместительству";
+            ws.Range(counter, 14, counter, 15).Merge();
+            ws.Cell(counter, 16).Value = "Корневое подразделение\\Подразделение почасовика";
+            ws.Range(counter, 16, counter, 17).Merge();
+            ws.Range(counter, 1, counter, 17).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 60;
+            counter++;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            using (var context = new RanepaDataContext())
+            {
+                foreach (Contact cont in contactList)
+                {
+                    ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "cz.k2it_year"));
+                    ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "cz.ntrlab_fullname_text"));
+                    ws.Cell(counter, 4).SetValue<string>(getFormattedValue(cont, "cz.ntrlab_class"));
+                    ws.Cell(counter, 5).SetValue<string>(getFormattedValue(cont, "cz.ntrlab_form"));
+                    ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "cz.ntrlab_founder_text"));
+                    ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "cx.k2it_name"));
+                    ws.Cell(counter, 8).SetValue<string>(getAliasedValue(cont, "cz.k2it_description"));
+                    ws.Cell(counter, 9).SetValue<string>(getFormattedValue(cont, "cz.ntrlab_honorary_title"));
+                    string mainWorkPlaceDep = "";
+                    string mainWorkPlaceRootDep = "";
+                    string intenalCombDep = "";
+                    string intenalCombRootDep = "";
+                    string externalCombDep = "";
+                    string externalCombRootDep = "";
+                    string byHourDep = "";
+                    string byHourRootDep = "";
+                    var k2it_positionCollection = context.AdvancedSearchFetch(
+                                string.Format(_allContactDeparmentQuery, cont.ContactId)).Entities
+                                .Select(le => (k2it_position)le);
+                    foreach (k2it_position pos in k2it_positionCollection)
+                    {
+                        if (pos.FormattedValues.ContainsKey("k2it_employment_type") && pos.FormattedValues["k2it_employment_type"] != null)
+                        {
+                            string employment_type = pos.FormattedValues["k2it_employment_type"].ToString();
+                            string depName = pos.Attributes.ContainsKey("ba.k2it_name") && ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value.ToString()) : "";
+                            string rootDepName = pos.Attributes.ContainsKey("bb.k2it_name") && ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value.ToString()) : "";
+                            if (employment_type.Contains("Основное место работы"))
+                            {
+                                mainWorkPlaceDep += !mainWorkPlaceDep.Contains(depName) ? depName : "";
+                                mainWorkPlaceRootDep += !mainWorkPlaceRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внутренний совместитель"))
+                            {
+                                intenalCombDep += !intenalCombDep.Contains(depName) ? depName : "";
+                                intenalCombRootDep += !intenalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внешний совместитель"))
+                            {
+                                externalCombDep += !externalCombDep.Contains(depName) ? depName : "";
+                                externalCombRootDep += !externalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Почасовик"))
+                            {
+                                byHourDep += !byHourDep.Contains(depName) ? depName : "";
+                                byHourRootDep += !byHourRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                        }
+                    }
+                    ws.Cell(counter, 10).SetValue<string>(mainWorkPlaceRootDep);
+                    ws.Cell(counter, 11).SetValue<string>(mainWorkPlaceDep);
+                    ws.Cell(counter, 12).SetValue<string>(intenalCombRootDep);
+                    ws.Cell(counter, 13).SetValue<string>(intenalCombDep);
+                    ws.Cell(counter, 14).SetValue<string>(externalCombRootDep);
+                    ws.Cell(counter, 15).SetValue<string>(externalCombDep);
+                    ws.Cell(counter, 16).SetValue<string>(byHourRootDep);
+                    ws.Cell(counter, 17).SetValue<string>(byHourDep);
+                    RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                }
+            }
+            return wb;
+        }
+
+        //Создание Excell отчета Авторство РИД
+        private XLWorkbook buildAuthorshipRidReport(List<Contact> contactList)
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("Аффилиация");
+            ws.Cell(counter, 3).SetValue<string>("Наименование РИД");
+            ws.Cell(counter, 4).SetValue<string>("Вид");
+            ws.Cell(counter, 5).SetValue<string>("Дата регистрации");
+            ws.Cell(counter, 6).SetValue<string>("Вид охраняемого документа");
+            ws.Cell(counter, 7).SetValue<string>("Номер охраняемого документа");
+            ws.Cell(counter, 8).SetValue<string>("Академический РИД");
+            ws.Cell(counter, 9).SetValue<string>("Проект");
+            ws.Cell(counter, 10).Value = "Корневое подразделение \\ Подразделение";
+            ws.Range(counter, 10, counter, 11).Merge();
+            ws.Cell(counter, 12).Value = "Корневое подразделение\\Подразделение по внутреннему совместительству";
+            ws.Range(counter, 12, counter, 13).Merge();
+            ws.Cell(counter, 14).Value = "Корневое подразделение\\Подразделение по внешнему совместительству";
+            ws.Range(counter, 14, counter, 15).Merge();
+            ws.Cell(counter, 16).Value = "Корневое подразделение\\Подразделение почасовика";
+            ws.Range(counter, 16, counter, 17).Merge();
+            ws.Range(counter, 1, counter, 17).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 60;
+            counter++;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            using (var context = new RanepaDataContext())
+            {
+                foreach (Contact cont in contactList)
+                {
+                    ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "cj.k2it_affiliation"));
+                    ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "cj.k2it_name"));
+                    ws.Cell(counter, 4).SetValue<string>(getFormattedValue(cont, "ck.k2it_type"));
+                    ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "ck.k2it_date"));
+                    ws.Cell(counter, 6).SetValue<string>(getFormattedValue(cont, "ck.k2it_document_type"));
+                    ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "ck.k2it_document_number"));
+                    ws.Cell(counter, 8).SetValue<string>(getFormattedValue(cont, "ck.k2it_academic"));
+                    ws.Cell(counter, 9).SetValue<string>(getAliasedValue(cont, "co.k2it_name"));
+                    string mainWorkPlaceDep = "";
+                    string mainWorkPlaceRootDep = "";
+                    string intenalCombDep = "";
+                    string intenalCombRootDep = "";
+                    string externalCombDep = "";
+                    string externalCombRootDep = "";
+                    string byHourDep = "";
+                    string byHourRootDep = "";
+                    var k2it_positionCollection = context.AdvancedSearchFetch(
+                                string.Format(_allContactDeparmentQuery, cont.ContactId)).Entities
+                                .Select(le => (k2it_position)le);
+                    foreach (k2it_position pos in k2it_positionCollection)
+                    {
+                        if (pos.FormattedValues.ContainsKey("k2it_employment_type") && pos.FormattedValues["k2it_employment_type"] != null)
+                        {
+                            string employment_type = pos.FormattedValues["k2it_employment_type"].ToString();
+                            string depName = pos.Attributes.ContainsKey("ba.k2it_name") && ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value.ToString()) : "";
+                            string rootDepName = pos.Attributes.ContainsKey("bb.k2it_name") && ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value.ToString()) : "";
+                            if (employment_type.Contains("Основное место работы"))
+                            {
+                                mainWorkPlaceDep += !mainWorkPlaceDep.Contains(depName) ? depName : "";
+                                mainWorkPlaceRootDep += !mainWorkPlaceRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внутренний совместитель"))
+                            {
+                                intenalCombDep += !intenalCombDep.Contains(depName) ? depName : "";
+                                intenalCombRootDep += !intenalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внешний совместитель"))
+                            {
+                                externalCombDep += !externalCombDep.Contains(depName) ? depName : "";
+                                externalCombRootDep += !externalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Почасовик"))
+                            {
+                                byHourDep += !byHourDep.Contains(depName) ? depName : "";
+                                byHourRootDep += !byHourRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                        }
+                    }
+                    ws.Cell(counter, 10).SetValue<string>(mainWorkPlaceRootDep);
+                    ws.Cell(counter, 11).SetValue<string>(mainWorkPlaceDep);
+                    ws.Cell(counter, 12).SetValue<string>(intenalCombRootDep);
+                    ws.Cell(counter, 13).SetValue<string>(intenalCombDep);
+                    ws.Cell(counter, 14).SetValue<string>(externalCombRootDep);
+                    ws.Cell(counter, 15).SetValue<string>(externalCombDep);
+                    ws.Cell(counter, 16).SetValue<string>(byHourRootDep);
+                    ws.Cell(counter, 17).SetValue<string>(byHourDep);
+                    RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                }
+            }
+            return wb;
+        }
+
+        //Создание Excell отчета Участие в проектах
+        private XLWorkbook buildParticipationProjectsReport(List<Contact> contactList)
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("Тип участия");
+            ws.Cell(counter, 3).SetValue<string>("Год начала выполнения работ");
+            ws.Cell(counter, 4).SetValue<string>("Дата окончания");
+            ws.Cell(counter, 5).SetValue<string>("Тип проекта");
+            ws.Cell(counter, 6).SetValue<string>("Номер темы");
+            ws.Cell(counter, 7).SetValue<string>("Тема");
+            ws.Cell(counter, 8).SetValue<string>("Уровень");
+            ws.Cell(counter, 9).SetValue<string>("Академический проект");
+            ws.Cell(counter, 10).SetValue<string>("В рамках гос.задания Академии");
+            ws.Cell(counter, 11).SetValue<string>("В ВУЗе из Топ-100");
+            ws.Cell(counter, 12).SetValue<string>("Совместно с иностранными специалистами");
+            ws.Cell(counter, 13).Value = "Корневое подразделение \\ Подразделение";
+            ws.Range(counter, 13, counter, 14).Merge();
+            ws.Cell(counter, 15).Value = "Корневое подразделение\\Подразделение по внутреннему совместительству";
+            ws.Range(counter, 15, counter, 16).Merge();
+            ws.Cell(counter, 17).Value = "Корневое подразделение\\Подразделение по внешнему совместительству";
+            ws.Range(counter, 17, counter, 18).Merge();
+            ws.Cell(counter, 19).Value = "Корневое подразделение\\Подразделение почасовика";
+            ws.Range(counter, 19, counter, 20).Merge();
+            ws.Range(counter, 1, counter, 20).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 60;
+            counter++;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            using (var context = new RanepaDataContext())
+            {
+                foreach (Contact cont in contactList)
+                {
+                    ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                    ws.Cell(counter, 2).SetValue<string>(getFormattedValue(cont, "cb.k2it_type"));
+                    ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "cc.k2it_year_start"));
+                    ws.Cell(counter, 4).SetValue<string>(getAliasedValue(cont, "cc.k2it_date_of_expiration"));
+                    ws.Cell(counter, 5).SetValue<string>(getFormattedValue(cont, "cc.k2it_type"));
+                    ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "cc.k2it_theme_number"));
+                    ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "cc.k2it_name"));
+                    ws.Cell(counter, 8).SetValue<string>(getFormattedValue(cont, "cc.k2it_level"));
+                    ws.Cell(counter, 9).SetValue<string>(getFormattedValue(cont, "cc.k2it_academic_project"));
+                    ws.Cell(counter, 10).SetValue<string>(getFormattedValue(cont, "cc.k2it_is_state_task"));
+                    ws.Cell(counter, 11).SetValue<string>(getFormattedValue(cont, "cc.k2it_top100"));
+                    ws.Cell(counter, 12).SetValue<string>(getFormattedValue(cont, "cc.k2it_foreign_specialist"));
+                    string mainWorkPlaceDep = "";
+                    string mainWorkPlaceRootDep = "";
+                    string intenalCombDep = "";
+                    string intenalCombRootDep = "";
+                    string externalCombDep = "";
+                    string externalCombRootDep = "";
+                    string byHourDep = "";
+                    string byHourRootDep = "";
+                    var k2it_positionCollection = context.AdvancedSearchFetch(
+                                string.Format(_allContactDeparmentQuery, cont.ContactId)).Entities
+                                .Select(le => (k2it_position)le);
+                    foreach (k2it_position pos in k2it_positionCollection)
+                    {
+                        if (pos.FormattedValues.ContainsKey("k2it_employment_type") && pos.FormattedValues["k2it_employment_type"] != null)
+                        {
+                            string employment_type = pos.FormattedValues["k2it_employment_type"].ToString();
+                            string depName = pos.Attributes.ContainsKey("ba.k2it_name") && ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value.ToString()) : "";
+                            string rootDepName = pos.Attributes.ContainsKey("bb.k2it_name") && ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value.ToString()) : "";
+                            if (employment_type.Contains("Основное место работы"))
+                            {
+                                mainWorkPlaceDep += !mainWorkPlaceDep.Contains(depName) ? depName : "";
+                                mainWorkPlaceRootDep += !mainWorkPlaceRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внутренний совместитель"))
+                            {
+                                intenalCombDep += !intenalCombDep.Contains(depName) ? depName : "";
+                                intenalCombRootDep += !intenalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внешний совместитель"))
+                            {
+                                externalCombDep += !externalCombDep.Contains(depName) ? depName : "";
+                                externalCombRootDep += !externalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Почасовик"))
+                            {
+                                byHourDep += !byHourDep.Contains(depName) ? depName : "";
+                                byHourRootDep += !byHourRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                        }
+                    }
+                    ws.Cell(counter, 13).SetValue<string>(mainWorkPlaceRootDep);
+                    ws.Cell(counter, 14).SetValue<string>(mainWorkPlaceDep);
+                    ws.Cell(counter, 15).SetValue<string>(intenalCombRootDep);
+                    ws.Cell(counter, 16).SetValue<string>(intenalCombDep);
+                    ws.Cell(counter, 17).SetValue<string>(externalCombRootDep);
+                    ws.Cell(counter, 18).SetValue<string>(externalCombDep);
+                    ws.Cell(counter, 19).SetValue<string>(byHourRootDep);
+                    ws.Cell(counter, 20).SetValue<string>(byHourDep);
+                    RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                }
+            }
+            return wb;
+        }
+
+        //Создание Excell отчета Повышение квалификации
+        private XLWorkbook buildTrainingReport(List<Contact> contactList)
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("Название курса");
+            ws.Cell(counter, 3).SetValue<string>("Дата прохождения");
+            ws.Cell(counter, 4).SetValue<string>("Тип образования");
+            ws.Cell(counter, 5).SetValue<string>("Количество часов");
+            ws.Cell(counter, 6).Value = "Корневое подразделение \\ Подразделение";
+            ws.Range(counter, 6, counter, 7).Merge();
+            ws.Cell(counter, 8).Value = "Корневое подразделение\\Подразделение по внутреннему совместительству";
+            ws.Range(counter, 8, counter, 9).Merge();
+            ws.Cell(counter, 10).Value = "Корневое подразделение\\Подразделение по внешнему совместительству";
+            ws.Range(counter, 10, counter, 11).Merge();
+            ws.Cell(counter, 12).Value = "Корневое подразделение\\Подразделение почасовика";
+            ws.Range(counter, 12, counter, 13).Merge();
+            ws.Range(counter, 1, counter, 13).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 60;
+            counter++;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            using (var context = new RanepaDataContext())
+            {
+                foreach (Contact cont in contactList)
+                {
+                    ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "ab.k2it_name"));
+                    ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "ab.k2it_finish_date"));
+                    ws.Cell(counter, 4).SetValue<string>(getFormattedValue(cont, "ab.k2it_training_type"));
+                    ws.Cell(counter, 5).SetValue<string>(getFormattedValue(cont, "ab.k2it_hours"));
+                    string mainWorkPlaceDep = "";
+                    string mainWorkPlaceRootDep = "";
+                    string intenalCombDep = "";
+                    string intenalCombRootDep = "";
+                    string externalCombDep = "";
+                    string externalCombRootDep = "";
+                    string byHourDep = "";
+                    string byHourRootDep = "";
+                    var k2it_positionCollection = context.AdvancedSearchFetch(
+                                string.Format(_allContactDeparmentQuery, cont.ContactId)).Entities
+                                .Select(le => (k2it_position)le);
+                    foreach (k2it_position pos in k2it_positionCollection)
+                    {
+                        if (pos.FormattedValues.ContainsKey("k2it_employment_type") && pos.FormattedValues["k2it_employment_type"] != null)
+                        {
+                            string employment_type = pos.FormattedValues["k2it_employment_type"].ToString();
+                            string depName = pos.Attributes.ContainsKey("ba.k2it_name") && ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value.ToString()) : "";
+                            string rootDepName = pos.Attributes.ContainsKey("bb.k2it_name") && ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value.ToString()) : "";
+                            if (employment_type.Contains("Основное место работы"))
+                            {
+                                mainWorkPlaceDep += !mainWorkPlaceDep.Contains(depName) ? depName : "";
+                                mainWorkPlaceRootDep += !mainWorkPlaceRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внутренний совместитель"))
+                            {
+                                intenalCombDep += !intenalCombDep.Contains(depName) ? depName : "";
+                                intenalCombRootDep += !intenalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внешний совместитель"))
+                            {
+                                externalCombDep += !externalCombDep.Contains(depName) ? depName : "";
+                                externalCombRootDep += !externalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Почасовик"))
+                            {
+                                byHourDep += !byHourDep.Contains(depName) ? depName : "";
+                                byHourRootDep += !byHourRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                        }
+                    }
+                    ws.Cell(counter, 6).SetValue<string>(mainWorkPlaceRootDep);
+                    ws.Cell(counter, 7).SetValue<string>(mainWorkPlaceDep);
+                    ws.Cell(counter, 8).SetValue<string>(intenalCombRootDep);
+                    ws.Cell(counter, 9).SetValue<string>(intenalCombDep);
+                    ws.Cell(counter, 10).SetValue<string>(externalCombRootDep);
+                    ws.Cell(counter, 11).SetValue<string>(externalCombDep);
+                    ws.Cell(counter, 12).SetValue<string>(byHourRootDep);
+                    ws.Cell(counter, 13).SetValue<string>(byHourDep);
+                    RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                }
+            }
+            return wb;
+        }
+
+        //Создание Excell отчета Публикации
+        private XLWorkbook buildPublicationsReport(List<Contact> contactList)
+        {
+            #region шапка
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            ws.Cell(counter, 1).SetValue<string>("Наименование публикации");
+            ws.Cell(counter, 2).SetValue<string>("Тип публикации");
+            //ws.Column(2).Width = 60;
+            ws.Cell(counter, 3).SetValue<string>("Аффилиация  РАНХиГС");
+            //ws.Column(3).Width = 60;
+            ws.Cell(counter, 4).Value = "Авторы (ФИО)";
+            //ws.Column(4).Width = 30;
+            ws.Cell(counter, 5).Value = "Журнал /Сборник";
+            //ws.Column(5).Width = 15;
+            ws.Cell(counter, 6).Value = "ISSN";
+            //ws.Column(6).Width = 25;
+            ws.Cell(counter, 7).Value = "Издательство";
+            //ws.Column(7).Width = 15;
+            ws.Cell(counter, 8).Value = "Номер (выпуск, том)";
+            //ws.Column(8).Width = 20;
+            ws.Cell(counter, 9).Value = "Год издания";
+            //ws.Column(9).Width = 17;
+            ws.Cell(counter, 10).Value = "Месяц издания";
+            //ws.Column(10).Width = 16;
+            ws.Cell(counter, 11).Value = "Страницы";
+            //ws.Column(11).Width = 16;
+            ws.Cell(counter, 12).Value = "Язык";
+            //ws.Column(12).Width = 22;
+            ws.Cell(counter, 13).Value = "DOI";
+            //ws.Column(13).Width = 52;
+            ws.Cell(counter, 14).Value = "ISBN";
+            //ws.Column(14).Width = 53;
+            ws.Cell(counter, 15).Value = "Наличие грифа";
+            ws.Cell(counter, 16).Value = "Рецензирование";
+            ws.Cell(counter, 17).Value = "Рецензенты";
+            ws.Cell(counter, 18).Value = "Количество страниц";
+            ws.Cell(counter, 19).Value = "Количество печатных листов";
+            ws.Cell(counter, 20).Value = "ВАК";
+            ws.Cell(counter, 21).Value = "РИНЦ";
+            ws.Cell(counter, 22).Value = "Импакт-фактор РИНЦ";
+            ws.Cell(counter, 23).Value = "Scopus";
+            ws.Cell(counter, 24).Value = "Квартиль Scopus";
+            ws.Cell(counter, 25).Value = "Web of Science";
+            ws.Cell(counter, 26).Value = "Квартиль Web of Science";
+            ws.Cell(counter, 27).Value = "e-library";
+            ws.Cell(counter, 28).Value = "REPeC";
+            ws.Cell(counter, 29).Value = "SSRN";
+            ws.Cell(counter, 30).Value = "RSCI, Core collection";
+            ws.Cell(counter, 31).Value = "ERICH";
+            ws.Cell(counter, 32).Value = "Область научного знания";
+            ws.Cell(counter, 33).Value = "Выходные данные";
+            ws.Cell(counter, 34).Value = "Ссылка  REPeC";
+            ws.Cell(counter, 35).Value = "Ссылка  SSRN";
+            ws.Cell(counter, 36).Value = "Ссылка на публикацию";
+            ws.Cell(counter, 37).Value = "Ключевые слова";
+            ws.Cell(counter, 38).Value = "В рамках госзадания";
+            ws.Cell(counter, 39).Value = "Академический проект";
+            ws.Cell(counter, 40).Value = "Тема проекта";
+            ws.Cell(counter, 41).Value = "Номер темы проекта";
+            ws.Cell(counter, 42).Value = "Год начала выполнения работ";
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 35;
+            #endregion шапка
+            counter++;
+            List<string> listForFindDupl = new List<string>();
+            #region основной контент
+            using (var context = new RanepaDataContext())
+            {
+                foreach (var cont in contactList)
+                {
+                    try
+                    {
+                        ws.Cell(counter, 1).SetValue<string>(getAliasedValue(cont, "bd.k2it_name"));
+                        string publicationType = getFormattedValue(cont, "bd.k2it_type");
+                        ws.Cell(counter, 2).SetValue<string>(publicationType);
+                        string k2it_coauthor_organization = getAliasedValue(cont, "bc.k2it_coauthor_organization");
+                        string participationType = getFormattedValue(cont, "bc.k2it_type");
+                        ws.Cell(counter, 3).SetValue<string>(participationType.Contains("Авторство") && k2it_coauthor_organization.Contains("РАНХиГС") ? "Да" : "");
+                        ws.Cell(counter, 4).SetValue<string>(getAliasedValue(cont, "bd.k2it_authors"));
+                        if (publicationType.Contains("Статья") || publicationType.Contains("Статья в сборнике научных трудов") ||
+                            publicationType.Contains("Статья в сборнике трудов конференции") || publicationType.Contains("Тезисы докладов научной конференции") ||
+                            publicationType.Contains("Глава монографии"))
+                        {
+                            ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "bd.k2it_publisher_name"));
+                        }
+                        ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "bd.k2it_printing_house"));
+                        string k2it_issue = getAliasedValue(cont, "bd.k2it_issue");
+                        string k2it_volume = getAliasedValue(cont, "bd.k2it_volume");
+                        ws.Cell(counter, 8).SetValue<string>(!string.IsNullOrEmpty(k2it_issue) && !string.IsNullOrEmpty(k2it_volume) ? string.Format("{0}({1})", k2it_issue, k2it_volume) : "");
+                        ws.Cell(counter, 9).SetValue<string>(getAliasedValue(cont, "bd.k2it_year"));
+                        ws.Cell(counter, 11).SetValue<string>(getAliasedValue(cont, "bd.k2it_page_numbers"));
+                        ws.Cell(counter, 12).SetValue<string>(getAliasedValue(cont, "ba.k2it_name"));
+                        ws.Cell(counter, 13).SetValue<string>(getAliasedValue(cont, "bd.k2it_doi"));
+                        ws.Cell(counter, 15).SetValue<string>(getFormattedValue(cont, "bd.k2it_has_signature"));
+                        string ntrlab_reviewers = getAliasedValue(cont, "bd.ntrlab_reviewers");
+                        ws.Cell(counter, 16).SetValue<string>(!string.IsNullOrEmpty(ntrlab_reviewers) ? "Да" : "Нет");
+                        ws.Cell(counter, 17).SetValue<string>(ntrlab_reviewers);
+                        ws.Cell(counter, 18).SetValue<string>(getAliasedValue(cont, "bd.k2it_page_count"));
+                        double k2it_list_count;
+                        bool succes = double.TryParse(getAliasedValue(cont, "bd.k2it_list_count"), out k2it_list_count);
+                        if (succes)
+                        {
+                            ws.Cell(counter, 19).SetValue<double>(k2it_list_count);
+                        }
+                        ws.Cell(counter, 20).SetValue<string>(getFormattedValue(cont, "bd.k2it_vak"));
+                        ws.Cell(counter, 21).SetValue<string>(getFormattedValue(cont, "bd.k2it_is_rinc"));
+                        double k2it_journal_index;
+                        succes = double.TryParse(getAliasedValue(cont, "bd.k2it_journal_index"), out k2it_journal_index);
+                        if (succes)
+                        {
+                            ws.Cell(counter, 22).SetValue<double>(k2it_journal_index);
+                        }
+                        string k2it_scopus = getFormattedValue(cont, "bd.k2it_scopus");
+                        ws.Cell(counter, 23).SetValue<string>(k2it_scopus);
+                        string k2it_wos = getFormattedValue(cont, "bd.k2it_wos");
+                        ws.Cell(counter, 25).SetValue<string>(k2it_wos);
+                        if (publicationType.Contains("Статья"))
+                        {
+                            ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "bd.k2it_isbn"));
+                            ws.Cell(counter, 10).SetValue<string>(getFormattedValue(cont, "bd.k2it_month"));
+                            ws.Cell(counter, 24).SetValue<string>(k2it_scopus.Contains("Да") ? getFormattedValue(cont, "bd.ntrlab_quartile_scopus") : "");
+                            ws.Cell(counter, 26).SetValue<string>(k2it_wos.Contains("Да") ? getFormattedValue(cont, "bd.ntrlab_quartile_wos") : "");
+                        }
+                        else
+                        {
+                            ws.Cell(counter, 14).SetValue<string>(getAliasedValue(cont, "bd.k2it_isbn"));
+                        }
+                        ws.Cell(counter, 27).SetValue<string>(getFormattedValue(cont, "bd.ntrlab_elibrary"));
+                        ws.Cell(counter, 28).SetValue<string>(getFormattedValue(cont, "bd.k2it_repec"));
+                        ws.Cell(counter, 29).SetValue<string>(getFormattedValue(cont, "bd.k2it_ssrn"));
+                        ws.Cell(counter, 30).SetValue<string>(getFormattedValue(cont, "bd.k2it_rsci_core_collection"));
+                        ws.Cell(counter, 31).SetValue<string>(getFormattedValue(cont, "bd.k2it_erich"));
+                        ws.Cell(counter, 32).SetValue<string>(getAliasedValue(cont, "bd.k2it_science_field"));
+                        ws.Cell(counter, 33).SetValue<string>(getAliasedValue(cont, "bd.k2it_rf_gost"));
+                        ws.Cell(counter, 34).SetValue<string>(getAliasedValue(cont, "bd.k2it_repository_link_repec"));
+                        ws.Cell(counter, 35).SetValue<string>(getAliasedValue(cont, "bd.k2it_repository_link_ssrn"));
+                        ws.Cell(counter, 36).SetValue<string>(getAliasedValue(cont, "bd.k2it_links"));
+                        ws.Cell(counter, 37).SetValue<string>(getAliasedValue(cont, "bd.k2it_keywords"));
+                        ws.Cell(counter, 38).SetValue<string>(getFormattedValue(cont, "bx.k2it_is_state_task"));
+                        ws.Cell(counter, 39).SetValue<string>(getFormattedValue(cont, "bx.k2it_academic_project"));
+                        ws.Cell(counter, 40).SetValue<string>(getAliasedValue(cont, "bx.k2it_name"));
+                        ws.Cell(counter, 41).SetValue<string>(getAliasedValue(cont, "bx.k2it_theme_number"));
+                        ws.Cell(counter, 42).SetValue<string>(getAliasedValue(cont, "bx.k2it_year_start"));
+                        RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                    }
+                    catch (Exception ex) { }
+
+                }
+            }
+
+            #endregion
+            return wb;
+        }
+
+        //Создание Excell отчета Научный рейтинг
+        private XLWorkbook buildScientificRatingReport(List<Contact> contactList)
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("Занимаемая должность");
+            ws.Cell(counter, 3).SetValue<string>("Научный рейтинг");
+            ws.Cell(counter, 4).SetValue<string>("Максимально возможное значение надбавки");
+            ws.Cell(counter, 5).SetValue<string>("Тип найма");
+            ws.Cell(counter, 6).SetValue<string>("Ставка");
+            ws.Cell(counter, 7).SetValue<string>("Подразделение");
+            ws.Cell(counter, 8).SetValue<string>("Корневое подразделение");
+            ws.Cell(counter, 9).SetValue<string>("Филиал");
+            ws.Range(counter, 1, counter, 9).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 60;
+            counter++;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            using (var context = new RanepaDataContext())
+            {
+                foreach (Contact cont in contactList)
+                {
+                    ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "ac.k2it_positionnametext"));
+                    ws.Cell(counter, 3).SetValue<string>(cont.ntrlab_science_rating != null ? double.Parse(cont.ntrlab_science_rating.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                    ws.Cell(counter, 4).SetValue<string>(cont.ntrlab_premium != null ? cont.ntrlab_premium.ToString() : "");
+                    ws.Cell(counter, 5).SetValue<string>(getFormattedValue(cont, "ac.k2it_employment_type"));
+                    ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "ac.k2it_rate") != "" ? double.Parse(getAliasedValue(cont, "ac.k2it_rate")).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                    ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "ag.k2it_name"));
+                    ws.Cell(counter, 8).SetValue<string>(getAliasedValue(cont, "ax.k2it_name"));
+                    ws.Cell(counter, 9).SetValue<string>(getAliasedValue(cont, "az.k2it_name"));
+                    RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                }
+            }
+            return wb;
+        }
+
+        //Создание Excell отчета Педагогический рейтинг
+        private XLWorkbook buildEducationalRatingReport(List<Contact> contactList)
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("Занимаемая должность");
+            ws.Cell(counter, 3).SetValue<string>("Педагогический рейтинг");
+            ws.Cell(counter, 4).SetValue<string>("Тип найма");
+            ws.Cell(counter, 5).SetValue<string>("Ставка");
+            ws.Cell(counter, 6).SetValue<string>("Подразделение");
+            ws.Cell(counter, 7).SetValue<string>("Корневое подразделение");
+            ws.Cell(counter, 8).SetValue<string>("Филиал");
+            ws.Range(counter, 1, counter, 8).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 60;
+            counter++;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            using (var context = new RanepaDataContext())
+            {
+                foreach (Contact cont in contactList)
+                {
+                    ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "ac.k2it_positionnametext"));
+                    ws.Cell(counter, 3).SetValue<string>(cont.ntrlab_rating != null ? double.Parse(cont.ntrlab_rating.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                    ws.Cell(counter, 4).SetValue<string>(getFormattedValue(cont, "ac.k2it_employment_type"));
+                    ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "ac.k2it_rate") != "" ? double.Parse(getAliasedValue(cont, "ac.k2it_rate")).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                    ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "ag.k2it_name"));
+                    ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "ax.k2it_name"));
+                    ws.Cell(counter, 8).SetValue<string>(getAliasedValue(cont, "az.k2it_name"));
+                    RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                }
+            }
+            return wb;
+        }
+
+        //Создание Excell отчета Участие в конференции
+        private XLWorkbook buildConferenceParticipationReport(List<Contact> contactList) {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Фамилия, инициалы участника мероприятия");
+            ws.Cell(counter, 2).SetValue<string>("Тип участия");
+            ws.Cell(counter, 3).SetValue<string>("Тема выступления");
+            ws.Cell(counter, 4).SetValue<string>("Дата выступления");
+            ws.Cell(counter, 5).SetValue<string>("Аффилиация");
+            ws.Cell(counter, 6).SetValue<string>("Проект");
+            ws.Cell(counter, 7).SetValue<string>("В рамках госзадания");
+            ws.Cell(counter, 8).SetValue<string>("Академический проект");
+            ws.Cell(counter, 9).SetValue<string>("Тип мероприятия");
+            ws.Cell(counter, 10).SetValue<string>("Название мероприятия ");
+            ws.Cell(counter, 11).SetValue<string>("Организатор");
+            ws.Cell(counter, 12).SetValue<string>("Место проведения");
+            ws.Cell(counter, 13).SetValue<string>("Дата начала");
+            ws.Cell(counter, 14).SetValue<string>("Дата окончания");
+            ws.Cell(counter, 15).SetValue<string>("Статус мероприятия");
+            ws.Cell(counter, 16).SetValue<string>("Мероприятие зарубежом");
+            ws.Cell(counter, 17).SetValue<string>("Языки конференции");
+            ws.Cell(counter, 18).SetValue<string>("Ссылка на сайт мероприятия");
+            ws.Cell(counter, 19).SetValue<string>("Корневое подразделение \\ Подразделение по основному месту работы");
+            ws.Range(counter, 19, counter, 20).Merge();
+            ws.Cell(counter, 21).SetValue<string>("Корневое подразделение\\Подразделение по внутреннему совместительству");
+            ws.Range(counter, 21, counter, 22).Merge();
+            ws.Cell(counter, 23).SetValue<string>("Корневое подразделение\\Подразделение по внешнему совместительству");
+            ws.Range(counter, 23, counter, 24).Merge();
+            ws.Cell(counter, 25).SetValue<string>("Корневое подразделение\\Подразделение почасовика");
+            ws.Range(counter, 25, counter, 26).Merge();
+            ws.Range(counter, 1, counter, 26).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Columns(19, 20).Width = 30;
+            ws.Columns(21, 22).Width = 30;
+            ws.Columns(23, 24).Width = 30;
+            ws.Columns(25, 26).Width = 30;
+            counter++;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            using (var context = new RanepaDataContext())
+            {
+                foreach (Contact cont in contactList)
+                {
+                    if (getFormattedValue(cont, "da.k2it_type") != "")
+                    {
+                        ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                        ws.Cell(counter, 2).SetValue<string>(getFormattedValue(cont, "da.k2it_type"));
+                        ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "da.k2it_theme"));
+                        DateTime tempDateTime;
+                        var culture = CultureInfo.CreateSpecificCulture("en-US");
+                        if (DateTime.TryParse(getFormattedValue(cont, "da.ntrlab_date"), culture, DateTimeStyles.None, out tempDateTime))
+                        {
+                            ws.Cell(counter, 4).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
+                        }
+                        ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "da.k2it_affiliation"));
+                        ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "db.k2it_theme_number") != "" ? string.Format("{0}, {1}", getAliasedValue(cont, "db.k2it_theme_number"), getAliasedValue(cont, "db.k2it_name")) : "");
+                        ws.Cell(counter, 7).SetValue<string>(getFormattedValue(cont, "db.k2it_is_state_task"));
+                        ws.Cell(counter, 8).SetValue<string>(getFormattedValue(cont, "db.k2it_academic_project"));
+                        ws.Cell(counter, 9).SetValue<string>(getFormattedValue(cont, "dc.k2it_type"));
+                        ws.Cell(counter, 10).SetValue<string>(getAliasedValue(cont, "dc.k2it_name"));
+                        ws.Cell(counter, 11).SetValue<string>(getAliasedValue(cont, "dc.k2it_organizer"));
+                        ws.Cell(counter, 12).SetValue<string>(getAliasedValue(cont, "dc.k2it_place"));
+                        if (DateTime.TryParse(getFormattedValue(cont, "dc.k2it_date_start"), culture, DateTimeStyles.None, out tempDateTime))
+                        {
+                            ws.Cell(counter, 13).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
+                        }
+                        if (DateTime.TryParse(getFormattedValue(cont, "dc.k2it_date_end"), culture, DateTimeStyles.None, out tempDateTime))
+                        {
+                            ws.Cell(counter, 14).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
+                        }
+                        ws.Cell(counter, 15).SetValue<string>(getFormattedValue(cont, "dc.k2it_status"));
+                        ws.Cell(counter, 16).SetValue<string>(getFormattedValue(cont, "dc.k2it_is_foreign"));
+                        ws.Cell(counter, 17).SetValue<string>(getAliasedValue(cont, "dc.k2it_languages"));
+                        ws.Cell(counter, 18).SetValue<string>(getAliasedValue(cont, "dc.k2it_url"));
+                    }
+                    if (getFormattedValue(cont, "fa.ntrlab_type") != "")
+                    {
+                        ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                        ws.Cell(counter, 2).SetValue<string>(getFormattedValue(cont, "fa.ntrlab_type"));
+                        ws.Cell(counter, 3).SetValue<string>(string.Format("{0}: {1}", getFormattedValue(cont, "fb.ntrlab_type"), getAliasedValue(cont, "fb.ntrlab_name")));
+                        DateTime tempDateTime;
+                        var culture = CultureInfo.CreateSpecificCulture("en-US");
+                        if (DateTime.TryParse(getFormattedValue(cont, "fb.ntrlab_date"), culture, DateTimeStyles.None, out tempDateTime))
+                        {
+                            ws.Cell(counter, 4).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
+                        }
+                        ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "db.k2it_theme_number") != "" ? string.Format("{0}, {1}", getAliasedValue(cont, "db.k2it_theme_number"), getAliasedValue(cont, "db.k2it_name")) : "");
+                        ws.Cell(counter, 7).SetValue<string>(getFormattedValue(cont, "db.k2it_is_state_task"));
+                        ws.Cell(counter, 8).SetValue<string>(getFormattedValue(cont, "db.k2it_academic_project"));
+                        ws.Cell(counter, 9).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_type"));
+                        ws.Cell(counter, 10).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_name"));
+                        ws.Cell(counter, 11).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_foundation"));
+                        ws.Cell(counter, 12).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_location"));
+                        if (DateTime.TryParse(getFormattedValue(cont, "fc.ntrlab_date_start"), culture, DateTimeStyles.None, out tempDateTime))
+                        {
+                            ws.Cell(counter, 13).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
+                        }
+                        if (DateTime.TryParse(getFormattedValue(cont, "fc.ntrlab_date_end"), culture, DateTimeStyles.None, out tempDateTime))
+                        {
+                            ws.Cell(counter, 14).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
+                        }
+                        ws.Cell(counter, 15).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_status"));
+                        ws.Cell(counter, 17).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_language"));
+                        ws.Cell(counter, 18).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_url"));
+                    }
+                    string mainWorkPlaceDep = "";
+                    string mainWorkPlaceRootDep = "";
+                    string intenalCombDep = "";
+                    string intenalCombRootDep = "";
+                    string externalCombDep = "";
+                    string externalCombRootDep = "";
+                    string byHourDep = "";
+                    string byHourRootDep = "";
+                    var k2it_positionCollection = context.AdvancedSearchFetch(
+                                string.Format(_allContactDeparmentQuery, cont.ContactId)).Entities
+                                .Select(le => (k2it_position)le);
+                    foreach (k2it_position pos in k2it_positionCollection)
+                    {
+                        if (pos.FormattedValues.ContainsKey("k2it_employment_type") && pos.FormattedValues["k2it_employment_type"] != null)
+                        {
+                            string employment_type = pos.FormattedValues["k2it_employment_type"].ToString();
+                            string depName = pos.Attributes.ContainsKey("ba.k2it_name") && ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value.ToString()) : "";
+                            string rootDepName = pos.Attributes.ContainsKey("bb.k2it_name") && ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value.ToString()) : "";
+                            if (employment_type.Contains("Основное место работы"))
+                            {
+                                mainWorkPlaceDep += !mainWorkPlaceDep.Contains(depName) ? depName : "";
+                                mainWorkPlaceRootDep += !mainWorkPlaceRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внутренний совместитель"))
+                            {
+                                intenalCombDep += !intenalCombDep.Contains(depName) ? depName : "";
+                                intenalCombRootDep += !intenalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внешний совместитель"))
+                            {
+                                externalCombDep += !externalCombDep.Contains(depName) ? depName : "";
+                                externalCombRootDep += !externalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Почасовик"))
+                            {
+                                byHourDep += !byHourDep.Contains(depName) ? depName : "";
+                                byHourRootDep += !byHourRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                        }
+                    }
+                    ws.Cell(counter, 19).SetValue<string>(mainWorkPlaceRootDep);
+                    ws.Cell(counter, 20).SetValue<string>(mainWorkPlaceDep);
+                    ws.Cell(counter, 21).SetValue<string>(intenalCombRootDep);
+                    ws.Cell(counter, 22).SetValue<string>(intenalCombDep);
+                    ws.Cell(counter, 23).SetValue<string>(externalCombRootDep);
+                    ws.Cell(counter, 24).SetValue<string>(externalCombDep);
+                    ws.Cell(counter, 25).SetValue<string>(byHourRootDep);
+                    ws.Cell(counter, 26).SetValue<string>(byHourDep);
+                    RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                }
+            }
+            return wb;
+        }
+
+        //Создание Excell отчета Научное руководство
+        private XLWorkbook buildScientificGuidanceReport(List<Contact> contactList)
+        {
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            #region шапка
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("Академический статус");
+            ws.Cell(counter, 3).SetValue<string>("Вид научного руководства");
+            ws.Cell(counter, 4).SetValue<string>("Дата защиты");
+            ws.Cell(counter, 5).SetValue<string>("Тема исследования");
+            ws.Cell(counter, 6).SetValue<string>("Описание");
+            ws.Cell(counter, 7).SetValue<string>("Подразделение");
+            ws.Cell(counter, 8).SetValue<string>("Корневое подразделение \\ Подразделение по основному месту работы");
+            ws.Range(counter, 8, counter, 9).Merge();
+            ws.Cell(counter, 10).SetValue<string>("Корневое подразделение\\Подразделение по внутреннему совместительству");
+            ws.Range(counter, 10, counter, 11).Merge();
+            ws.Cell(counter, 12).SetValue<string>("Корневое подразделение\\Подразделение по внешнему совместительству");
+            ws.Range(counter, 12, counter, 13).Merge();
+            ws.Cell(counter, 14).SetValue<string>("Корневое подразделение\\Подразделение почасовика");
+            ws.Range(counter, 14, counter, 15).Merge();
+            ws.Range(counter, 1, counter, 15).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 35;
+            ws.Columns(8,9).Width = 30;
+            ws.Columns(10,11).Width = 30;
+            ws.Columns(12,13).Width = 30;
+            ws.Columns(14,15).Width = 30;
+            counter++;
+            #endregion
+            List<string> listForFindDupl = new List<string>();
+            using (var context = new RanepaDataContext())
+            {
+                foreach (Contact cont in contactList)
+                {
+                    ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                    ws.Cell(counter, 2).SetValue<string>(getFormattedValue(cont, "ca.k2it_academic_status"));
+                    ws.Cell(counter, 3).SetValue<string>(getFormattedValue(cont, "ca.k2it_type"));
+                    DateTime tempDateTime;
+                    var culture = CultureInfo.CreateSpecificCulture("en-US");
+                    if (DateTime.TryParse(getFormattedValue(cont, "ca.ntrlab_date"), culture, DateTimeStyles.None, out tempDateTime))
+                    {
+                        ws.Cell(counter, 4).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
+                    }
+                    ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "ca.k2it_theme"));
+                    ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "ca.k2it_description"));
+                    ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "ag.k2it_name"));
+                    string mainWorkPlaceDep = "";
+                    string mainWorkPlaceRootDep = "";
+                    string intenalCombDep = "";
+                    string intenalCombRootDep = "";
+                    string externalCombDep = "";
+                    string externalCombRootDep = "";
+                    string byHourDep = "";
+                    string byHourRootDep = "";
+                    var k2it_positionCollection = context.AdvancedSearchFetch(
+                                string.Format(_allContactDeparmentQuery, cont.ContactId)).Entities
+                                .Select(le => (k2it_position)le);
+                    foreach (k2it_position pos in k2it_positionCollection)
+                    {
+                        if (pos.FormattedValues.ContainsKey("k2it_employment_type") && pos.FormattedValues["k2it_employment_type"] != null)
+                        {
+                            string employment_type = pos.FormattedValues["k2it_employment_type"].ToString();
+                            string depName = pos.Attributes.ContainsKey("ba.k2it_name") && ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value.ToString()) : "";
+                            string rootDepName = pos.Attributes.ContainsKey("bb.k2it_name") && ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value.ToString()) : "";
+                            if (employment_type.Contains("Основное место работы"))
+                            {
+                                mainWorkPlaceDep += !mainWorkPlaceDep.Contains(depName) ? depName : "";
+                                mainWorkPlaceRootDep += !mainWorkPlaceRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внутренний совместитель"))
+                            {
+                                intenalCombDep += !intenalCombDep.Contains(depName) ? depName : "";
+                                intenalCombRootDep += !intenalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Внешний совместитель"))
+                            {
+                                externalCombDep += !externalCombDep.Contains(depName) ? depName : "";
+                                externalCombRootDep += !externalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                            if (employment_type.Contains("Почасовик"))
+                            {
+                                byHourDep += !byHourDep.Contains(depName) ? depName : "";
+                                byHourRootDep += !byHourRootDep.Contains(rootDepName) ? rootDepName : "";
+                            }
+                        }
+                    }
+                    ws.Cell(counter, 8).SetValue<string>(mainWorkPlaceRootDep);
+                    ws.Cell(counter, 9).SetValue<string>(mainWorkPlaceDep);
+                    ws.Cell(counter, 10).SetValue<string>(intenalCombRootDep);
+                    ws.Cell(counter, 11).SetValue<string>(intenalCombDep);
+                    ws.Cell(counter, 12).SetValue<string>(externalCombRootDep);
+                    ws.Cell(counter, 13).SetValue<string>(externalCombDep);
+                    ws.Cell(counter, 14).SetValue<string>(byHourRootDep);
+                    ws.Cell(counter, 15).SetValue<string>(byHourDep);
+                    RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                }
+            }
+            return wb;
+        }
+
+        //Создание Excell отчета Авторство публикаций
+        private XLWorkbook buildAuthorPublicationReport(List<Contact> contactList)
+        {
+            #region шапка
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            ws.Cell(counter, 1).SetValue<string>("Сотрудник");
+            ws.Cell(counter, 2).SetValue<string>("SPIN");
+            //ws.Column(2).Width = 60;
+            ws.Cell(counter, 3).SetValue<string>("ORCID");
+            //ws.Column(3).Width = 60;
+            ws.Cell(counter, 4).Value = "Researcher ID";
+            //ws.Column(4).Width = 30;
+            ws.Cell(counter, 5).Value = "Аффилиация автора";
+            //ws.Column(5).Width = 15;
+            ws.Cell(counter, 6).Value = "Наименование публикации";
+            //ws.Column(6).Width = 25;
+            ws.Cell(counter, 7).Value = "Тип публикации";
+            //ws.Column(7).Width = 15;
+            ws.Cell(counter, 8).Value = "Аффилиация РАНХиГС";
+            //ws.Column(8).Width = 20;
+            ws.Cell(counter, 9).Value = "Авторы (ФИО)";
+            //ws.Column(9).Width = 17;
+            ws.Cell(counter, 10).Value = "Журнал /Сборник";
+            //ws.Column(10).Width = 16;
+            ws.Cell(counter, 11).Value = "ISSN";
+            //ws.Column(11).Width = 16;
+            ws.Cell(counter, 12).Value = "Издательство";
+            //ws.Column(12).Width = 22;
+            ws.Cell(counter, 13).Value = "Номер (выпуск, том)";
+            //ws.Column(13).Width = 52;
+            ws.Cell(counter, 14).Value = "Год издания";
+            //ws.Column(14).Width = 53;
+            ws.Cell(counter, 15).Value = "Месяц издания";
+            ws.Cell(counter, 16).Value = "Страницы";
+            ws.Cell(counter, 17).Value = "Язык";
+            ws.Cell(counter, 18).Value = "DOI";
+            ws.Cell(counter, 19).Value = "ISBN";
+            ws.Cell(counter, 20).Value = "Наличие грифа";
+            ws.Cell(counter, 21).Value = "Рецензирование";
+            ws.Cell(counter, 22).Value = "Рецензенты";
+            ws.Cell(counter, 23).Value = "Количество страниц";
+            ws.Cell(counter, 24).Value = "Количество печатных листов";
+            ws.Cell(counter, 25).Value = "ВАК";
+            ws.Cell(counter, 26).Value = "РИНЦ";
+            ws.Cell(counter, 27).Value = "Импакт-фактор РИНЦ";
+            ws.Cell(counter, 28).Value = "Scopus";
+            ws.Cell(counter, 29).Value = "Квартиль Scopus";
+            ws.Cell(counter, 30).Value = "Web of Science";
+            ws.Cell(counter, 31).Value = "Квартиль Web of Science";
+            ws.Cell(counter, 32).Value = "e-library";
+            ws.Cell(counter, 33).Value = "REPeC";
+            ws.Cell(counter, 34).Value = "SSRN";
+            ws.Cell(counter, 35).Value = "RSCI, Core collection";
+            ws.Cell(counter, 36).Value = "ERICH";
+            ws.Cell(counter, 37).Value = "Область научного знания";
+            ws.Cell(counter, 38).Value = "Выходные данные";
+            ws.Cell(counter, 39).Value = "Ссылка  REPeC";
+            ws.Cell(counter, 40).Value = "Ссылка  SSRN";
+            ws.Cell(counter, 41).Value = "Сссылка на публикацию";
+            ws.Cell(counter, 42).Value = "Ключевые слова";
+            ws.Cell(counter, 43).Value = "В рамках госзадания";
+            ws.Cell(counter, 44).Value = "Академический проект";
+            ws.Cell(counter, 45).Value = "Тема проекта";
+            ws.Cell(counter, 46).Value = "Номер темы проекта";
+            ws.Cell(counter, 47).Value = "Год начала выполнения работ";
+            ws.Cell(counter, 48).Value = "Корневое подразделение \\ Подразделение";
+            ws.Range(counter, 48, counter, 49).Merge();
+            ws.Cell(counter, 50).Value = "Корневое подразделение\\Подразделение по внутреннему совместительству";
+            ws.Range(counter, 50, counter, 51).Merge();
+            ws.Cell(counter, 52).Value = "Корневое подразделение\\Подразделение по внешнему совместительству";
+            ws.Range(counter, 52, counter, 53).Merge();
+            ws.Cell(counter, 54).Value = "Корневое подразделение\\Подразделение почасовика";
+            ws.Range(counter, 54, counter, 55).Merge();
+            ws.Range(counter, 1, counter, 24).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Range(counter, 25, counter, 36).Style.Fill.BackgroundColor = XLColor.LightPink;
+            ws.Range(counter, 37, counter, 42).Style.Fill.BackgroundColor = XLColor.LightBlue;
+            ws.Range(counter, 43, counter, 47).Style.Fill.BackgroundColor = XLColor.LightGreen;
+            ws.Range(counter, 48, counter, 55).Style.Fill.BackgroundColor = XLColor.Yellow;
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 35;
+            #endregion шапка
+            counter++;
+            List<string> listForFindDupl = new List<string> ();
+            #region основной контент
+            using (var context = new RanepaDataContext())
+            {
+                foreach (var cont in contactList)
+                {
+                    try
+                    {
+                        ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                        ws.Cell(counter, 2).SetValue<string>(cont.k2it_spin);
+                        ws.Cell(counter, 3).SetValue<string>(cont.k2it_orcid);
+                        ws.Cell(counter, 4).SetValue<string>(cont.k2it_ResearcherID);
+                        string k2it_coauthor_organization = cont.Attributes.ContainsKey("bc.k2it_coauthor_organization") ? (((AliasedValue)cont.Attributes["bc.k2it_coauthor_organization"]).Value == null ? "" : ((AliasedValue)cont.Attributes["bc.k2it_coauthor_organization"]).Value.ToString()) : "";
+                        ws.Cell(counter, 5).SetValue<string>(k2it_coauthor_organization);
+                        ws.Cell(counter, 6).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_name") ? (((AliasedValue)cont.Attributes["bd.k2it_name"]).Value == null ? "" : ((AliasedValue)cont.Attributes["bd.k2it_name"]).Value.ToString()) : "");
+                        string publicationType = cont.FormattedValues.ContainsKey("bd.k2it_type") && !string.IsNullOrEmpty(cont.FormattedValues["bd.k2it_type"]) ? cont.FormattedValues["bd.k2it_type"] : "";
+                        ws.Cell(counter, 7).SetValue<string>(publicationType);
+                        string participationType = cont.FormattedValues.ContainsKey("bc.k2it_type") && !string.IsNullOrEmpty(cont.FormattedValues["bc.k2it_type"]) ? cont.FormattedValues["bc.k2it_type"] : "";
+                        ws.Cell(counter, 8).SetValue<string>(participationType.Contains("Авторство") && k2it_coauthor_organization.Contains("РАНХиГС") ? "Да" : "");
+                        ws.Cell(counter, 9).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_authors") ? (((AliasedValue)cont.Attributes["bd.k2it_authors"]).Value == null ? "" : ((AliasedValue)cont.Attributes["bd.k2it_authors"]).Value.ToString()) : "");
+                        if (publicationType.Contains("Статья") || publicationType.Contains("Статья в сборнике научных трудов") ||
+                            publicationType.Contains("Статья в сборнике трудов конференции") || publicationType.Contains("Тезисы докладов научной конференции") ||
+                            publicationType.Contains("Глава монографии"))
+                        {
+                            ws.Cell(counter, 10).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_publisher_name") ? (((AliasedValue)cont.Attributes["bd.k2it_publisher_name"]).Value == null ? "" : ((AliasedValue)cont.Attributes["bd.k2it_publisher_name"]).Value.ToString()) : "");
+                        }
+                        ws.Cell(counter, 12).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_printing_house") ? (((AliasedValue)cont.Attributes["bd.k2it_printing_house"]).Value == null ? "" : ((AliasedValue)cont.Attributes["bd.k2it_printing_house"]).Value.ToString()) : "");
+                        string k2it_issue = cont.Attributes.ContainsKey("bd.k2it_issue") && ((AliasedValue)cont.Attributes["bd.k2it_issue"]).Value != null ? ((AliasedValue)cont.Attributes["bd.k2it_issue"]).Value.ToString() : "";
+                        string k2it_volume = cont.Attributes.ContainsKey("bd.k2it_volume") && ((AliasedValue)cont.Attributes["bd.k2it_volume"]).Value != null ? ((AliasedValue)cont.Attributes["bd.k2it_volume"]).Value.ToString() : "";
+                        ws.Cell(counter, 13).SetValue<string>(!string.IsNullOrEmpty(k2it_issue) && !string.IsNullOrEmpty(k2it_volume) ? string.Format("{0}({1})", k2it_issue, k2it_volume) : "");
+                        ws.Cell(counter, 14).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_year") && ((AliasedValue)cont.Attributes["bd.k2it_year"]).Value != null ? ((AliasedValue)cont.Attributes["bd.k2it_year"]).Value.ToString() : "");
+                        ws.Cell(counter, 16).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_page_numbers") && ((AliasedValue)cont.Attributes["bd.k2it_page_numbers"]).Value != null ? ((AliasedValue)cont.Attributes["bd.k2it_page_numbers"]).Value.ToString() : "");
+                        ws.Cell(counter, 17).SetValue<string>(getAliasedValue(cont, "ba.k2it_name"));
+                        ws.Cell(counter, 18).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_doi") && ((AliasedValue)cont.Attributes["bd.k2it_doi"]).Value != null ? ((AliasedValue)cont.Attributes["bd.k2it_doi"]).Value.ToString() : "");
+                        ws.Cell(counter, 20).SetValue<string>(cont.FormattedValues.ContainsKey("bd.k2it_has_signature") && !string.IsNullOrEmpty(cont.FormattedValues["bd.k2it_has_signature"]) ? cont.FormattedValues["bd.k2it_has_signature"] : "");
+                        string ntrlab_reviewers = cont.Attributes.ContainsKey("bd.ntrlab_reviewers") && ((AliasedValue)cont.Attributes["bd.ntrlab_reviewers"]).Value != null ? ((AliasedValue)cont.Attributes["bd.ntrlab_reviewers"]).Value.ToString() : "";
+                        ws.Cell(counter, 21).SetValue<string>(!string.IsNullOrEmpty(ntrlab_reviewers) ? "Да" : "Нет");
+                        ws.Cell(counter, 22).SetValue<string>(ntrlab_reviewers);
+                        ws.Cell(counter, 23).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_page_count") && ((AliasedValue)cont.Attributes["bd.k2it_page_count"]).Value != null ? ((AliasedValue)cont.Attributes["bd.k2it_page_count"]).Value.ToString() : "");
+                        double k2it_list_count;
+                        bool succes = double.TryParse(getAliasedValue(cont, "bd.k2it_list_count"), out k2it_list_count);
+                        if (succes)
+                        {
+                            ws.Cell(counter, 24).SetValue<double>(k2it_list_count);
+                        }
+                        ws.Cell(counter, 25).SetValue<string>(cont.FormattedValues.ContainsKey("bd.k2it_vak") && cont.FormattedValues["bd.k2it_vak"] != null ? cont.FormattedValues["bd.k2it_vak"] : "");
+                        ws.Cell(counter, 26).SetValue<string>(cont.FormattedValues.ContainsKey("bd.k2it_is_rinc") && cont.FormattedValues["bd.k2it_is_rinc"] != null ? cont.FormattedValues["bd.k2it_is_rinc"] : "");
+                        double k2it_journal_index;
+                        succes = double.TryParse(getAliasedValue(cont, "bd.k2it_journal_index"), out k2it_journal_index);
+                        if (succes)
+                        {
+                            ws.Cell(counter, 27).SetValue<double>(k2it_journal_index);
+                        }
+                        string k2it_scopus = cont.FormattedValues.ContainsKey("bd.k2it_scopus") && cont.FormattedValues["bd.k2it_scopus"] != null ? cont.FormattedValues["bd.k2it_scopus"] : "";
+                        ws.Cell(counter, 28).SetValue<string>(k2it_scopus);
+                        string k2it_wos = cont.FormattedValues.ContainsKey("bd.k2it_wos") && cont.FormattedValues["bd.k2it_wos"] != null ? cont.FormattedValues["bd.k2it_wos"] : "";
+                        ws.Cell(counter, 30).SetValue<string>(k2it_wos);
+                        if (publicationType.Contains("Статья"))
+                        {
+                            ws.Cell(counter, 11).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_isbn") ? (((AliasedValue)cont.Attributes["bd.k2it_isbn"]).Value == null ? "" : ((AliasedValue)cont.Attributes["bd.k2it_isbn"]).Value.ToString()) : "");
+                            ws.Cell(counter, 15).SetValue<string>(cont.FormattedValues.ContainsKey("bd.k2it_month") && !string.IsNullOrEmpty(cont.FormattedValues["bd.k2it_month"]) ? cont.FormattedValues["bd.k2it_month"] : "");
+                            ws.Cell(counter, 29).SetValue<string>(cont.FormattedValues.ContainsKey("bd.ntrlab_quartile_scopus") && cont.FormattedValues["bd.ntrlab_quartile_scopus"] != null && k2it_scopus.Contains("Да") ? cont.FormattedValues["bd.ntrlab_quartile_scopus"] : "");
+                            ws.Cell(counter, 31).SetValue<string>(cont.FormattedValues.ContainsKey("bd.ntrlab_quartile_wos") && cont.FormattedValues["bd.ntrlab_quartile_wos"] != null && k2it_wos.Contains("Да") ? cont.FormattedValues["bd.ntrlab_quartile_wos"] : "");
+                        }
+                        else
+                        {
+                            ws.Cell(counter, 19).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_isbn") && !string.IsNullOrEmpty(publicationType) ? (((AliasedValue)cont.Attributes["bd.k2it_isbn"]).Value == null ? "" : ((AliasedValue)cont.Attributes["bd.k2it_isbn"]).Value.ToString()) : "");
+                        }
+                        ws.Cell(counter, 32).SetValue<string>(cont.FormattedValues.ContainsKey("bd.ntrlab_elibrary") && cont.FormattedValues["bd.ntrlab_elibrary"] != null ? cont.FormattedValues["bd.ntrlab_elibrary"] : "");
+                        ws.Cell(counter, 33).SetValue<string>(cont.FormattedValues.ContainsKey("bd.k2it_repec") && cont.FormattedValues["bd.k2it_repec"] != null ? cont.FormattedValues["bd.k2it_repec"] : "");
+                        ws.Cell(counter, 34).SetValue<string>(cont.FormattedValues.ContainsKey("bd.k2it_ssrn") && cont.FormattedValues["bd.k2it_ssrn"] != null ? cont.FormattedValues["bd.k2it_ssrn"] : "");
+                        ws.Cell(counter, 35).SetValue<string>(getFormattedValue(cont, "bd.k2it_rsci_core_collection"));
+                        ws.Cell(counter, 36).SetValue<string>(getFormattedValue(cont, "bd.k2it_erich"));
+                        ws.Cell(counter, 37).SetValue<string>(getAliasedValue(cont, "bd.k2it_science_field"));
+                        ws.Cell(counter, 38).SetValue<string>(getAliasedValue(cont, "bd.k2it_rf_gost"));
+                        ws.Cell(counter, 39).SetValue<string>(getAliasedValue(cont, "bd.k2it_repository_link_repec"));
+                        ws.Cell(counter, 40).SetValue<string>(getAliasedValue(cont, "bd.k2it_repository_link_ssrn"));
+                        ws.Cell(counter, 41).SetValue<string>(getAliasedValue(cont, "bd.k2it_links"));
+                        ws.Cell(counter, 42).SetValue<string>(getAliasedValue(cont, "bd.k2it_keywords"));
+                        ws.Cell(counter, 43).SetValue<string>(getFormattedValue(cont, "bx.k2it_is_state_task"));
+                        ws.Cell(counter, 44).SetValue<string>(getFormattedValue(cont, "bx.k2it_academic_project"));
+                        ws.Cell(counter, 45).SetValue<string>(getAliasedValue(cont, "bx.k2it_name"));
+                        ws.Cell(counter, 46).SetValue<string>(getAliasedValue(cont, "bx.k2it_theme_number"));
+                        ws.Cell(counter, 47).SetValue<string>(getAliasedValue(cont, "bx.k2it_year_start"));
+                        string mainWorkPlaceDep = "";
+                        string mainWorkPlaceRootDep = "";
+                        string intenalCombDep = "";
+                        string intenalCombRootDep = "";
+                        string externalCombDep = "";
+                        string externalCombRootDep = "";
+                        string byHourDep = "";
+                        string byHourRootDep = "";
+                        var k2it_positionCollection = context.AdvancedSearchFetch(
+                                    string.Format(_allContactDeparmentQuery, cont.ContactId)).Entities
+                                    .Select(le => (k2it_position)le);
+                        foreach(k2it_position pos in k2it_positionCollection)
+                        {
+                            if (pos.FormattedValues.ContainsKey("k2it_employment_type") && pos.FormattedValues["k2it_employment_type"] != null) {
+                                string employment_type = pos.FormattedValues["k2it_employment_type"].ToString();
+                                string depName = pos.Attributes.ContainsKey("ba.k2it_name") && ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["ba.k2it_name"]).Value.ToString()) : "";
+                                string rootDepName = pos.Attributes.ContainsKey("bb.k2it_name") && ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value != null ? string.Format("{0}; ", ((AliasedValue)pos.Attributes["bb.k2it_name"]).Value.ToString()) : "";
+                                if (employment_type.Contains("Основное место работы"))
+                                {
+                                    mainWorkPlaceDep += !mainWorkPlaceDep.Contains(depName) ? depName : "";
+                                    mainWorkPlaceRootDep += !mainWorkPlaceRootDep.Contains(rootDepName) ? rootDepName : "";
+                                }
+                                if (employment_type.Contains("Внутренний совместитель"))
+                                {
+                                    intenalCombDep += !intenalCombDep.Contains(depName) ? depName : "";
+                                    intenalCombRootDep += !intenalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                                }
+                                if (employment_type.Contains("Внешний совместитель"))
+                                {
+                                    externalCombDep += !externalCombDep.Contains(depName) ? depName : "";
+                                    externalCombRootDep += !externalCombRootDep.Contains(rootDepName) ? rootDepName : "";
+                                }
+                                if (employment_type.Contains("Почасовик"))
+                                {
+                                    byHourDep += !byHourDep.Contains(depName) ? depName : "";
+                                    byHourRootDep += !byHourRootDep.Contains(rootDepName) ? rootDepName : "";
+                                }
+                            }
+                        }
+                        ws.Cell(counter, 48).SetValue<string>(mainWorkPlaceRootDep);
+                        ws.Cell(counter, 49).SetValue<string>(mainWorkPlaceDep);
+                        ws.Cell(counter, 50).SetValue<string>(intenalCombRootDep);
+                        ws.Cell(counter, 51).SetValue<string>(intenalCombDep);
+                        ws.Cell(counter, 52).SetValue<string>(externalCombRootDep);
+                        ws.Cell(counter, 53).SetValue<string>(externalCombDep);
+                        ws.Cell(counter, 54).SetValue<string>(byHourRootDep);
+                        ws.Cell(counter, 55).SetValue<string>(byHourDep);
+                        RemoveDuplicates(ref counter, ref ws, ref listForFindDupl);
+                    }
+                    catch (Exception ex) { }
+                    
+                }
+            }
+            
+            #endregion
+            return wb;
+        }
+
+        private void RemoveDuplicates(ref int counter, ref IXLWorksheet ws, ref List<string> listForFindDupl)
+        {
+            string rowString = "";
+            foreach (var cell in ws.Row(counter).CellsUsed())
+            {
+                if (cell.Value != null)
+                {
+                    rowString += string.Format("{0}#", cell.Value.ToString());
+                }
+            }
+            if (listForFindDupl.Contains(rowString))
+            {
+                ws.Row(counter).Delete();
+            }
+            else
+            {
+                listForFindDupl.Add(rowString);
+                counter++;
+            }
+        }
+
+        private string getFormattedValue(Contact cont, string field)
+        {
+            return cont.FormattedValues.ContainsKey(field) && cont.FormattedValues[field] != null ? cont.FormattedValues[field] : "";
+        }
+
+
+        private string getAliasedValue(Contact cont, string field)
+        {
+            return cont.Attributes.ContainsKey(field) && ((AliasedValue)cont.Attributes[field]).Value != null ? ((AliasedValue)cont.Attributes[field]).Value.ToString() : "";
+        }
+
+        //создание Excell всех сотрудников подразделений с краткой инфо
+        private XLWorkbook buildDepListReport(List<Contact> contactList)
+        {
+
+            #region шапка
+            var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add(Localization.Localization.Current.PeopleSearch.CoworkersList);
+            var counter = 1;
+            ws.Cell(counter, 1).SetValue<string>(Localization.Localization.Current.PeopleSearch.FIO);
+            ws.Column(1).Width = 60;
+            ws.Cell(counter, 2).SetValue<string>("Подразделение");
+            ws.Column(2).Width = 60;
+            ws.Cell(counter, 3).SetValue<string>("Должность");
+            ws.Column(3).Width = 60;
+            ws.Cell(counter, 4).Value = "Тип найма + ставка";
+            ws.Column(4).Width = 30;
+            ws.Cell(counter, 5).Value = "Ученая степень";
+            ws.Column(5).Width = 15;
+            ws.Cell(counter, 6).Value = "Зарубежная ученая степень";
+            ws.Column(6).Width = 25;
+            ws.Cell(counter, 7).Value = "Ученое звание";
+            ws.Column(7).Width = 15;
+            ws.Cell(counter, 8).Value = "Члены РАН";
+            ws.Column(8).Width = 20;
+            ws.Cell(counter, 9).Value = "Иностранные ВКС";
+            ws.Column(9).Width = 17;
+            ws.Cell(counter, 10).Value = "Почетные звания";
+            ws.Column(10).Width = 16;
+            ws.Cell(counter, 11).Value = "Ордена, Медали";
+            ws.Column(11).Width = 16;
+            ws.Cell(counter, 12).Value = "Благодарности, премии";
+            ws.Column(12).Width = 22;
+            ws.Cell(counter, 13).Value = "Участники всероссийских  профессиональных конкурсов";
+            ws.Column(13).Width = 52;
+            ws.Cell(counter, 14).Value = "Участники международных  профессиональных конкурсов";
+            ws.Column(14).Width = 53;
+            ws.Range("A1", "N1").Style.Fill.BackgroundColor = XLColor.LightBlue;
+            #endregion шапка
+            counter++;
+            #region основной контент
+            using (var context = new RanepaDataContext())
+            {
+                foreach (var cont in contactList)
+                {
+                    //ФИО
+                    ws.Cell(counter, 1).SetValue<string>(cont.FullName);
+                    //Подразделение
+                    ws.Cell(counter, 2).SetValue<string>(cont.Attributes.ContainsKey("ag.k2it_name") ? (((AliasedValue)cont.Attributes["ag.k2it_name"]).Value == null ? "" : ((AliasedValue)cont.Attributes["ag.k2it_name"]).Value.ToString()) : "");
+                    //Должность
+                    ws.Cell(counter, 3).SetValue<string>(cont.Attributes.ContainsKey("ac.k2it_positionnametext") ? (((AliasedValue)cont.Attributes["ac.k2it_positionnametext"]).Value == null ? "" : ((AliasedValue)cont.Attributes["ac.k2it_positionnametext"]).Value.ToString()) : "");
+                    //Тип найма + ставка
+                    string k2it_employment_type = cont.FormattedValues.ContainsKey("ac.k2it_employment_type") ? (cont.FormattedValues["ac.k2it_employment_type"] == null ? "" : cont.FormattedValues["ac.k2it_employment_type"]).ToString() : "";
+                    String tryParseToDouble()
+                    {
+                        double tempDouble;
+                        bool success = double.TryParse(((AliasedValue)cont.Attributes["ac.k2it_rate"]).Value.ToString(), out tempDouble);
+                        return success ? tempDouble.ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "";
+                    }
+                    string k2it_rate = cont.Attributes.ContainsKey("ac.k2it_rate") ? (((AliasedValue)cont.Attributes["ac.k2it_rate"]).Value == null ? "" : tryParseToDouble()) : "";
+                    ws.Cell(counter, 4).SetValue<string>(string.Format("{0} + {1}", k2it_employment_type, k2it_rate));
+                    //Ученая степень
+                    //При наличии значений Доктор и Кандидат, актальное Доктор
+                    string k2it_academic_degree = "";
+                    var k2it_academic_degreeFetch = context.AdvancedSearchFetch(
+                                string.Format(_academic_degreeQuery, cont.ContactId)).Entities
+                                .Select(le => (k2it_teacher_academic_degree)le);
+                    foreach (k2it_teacher_academic_degree degree in k2it_academic_degreeFetch)
+                    {
+                        if(degree.FormattedValues.ContainsKey("k2it_academic_degree") && degree.FormattedValues["k2it_academic_degree"] != null)
+                        {
+                            k2it_academic_degree += string.Format("{0}; ", degree.FormattedValues["k2it_academic_degree"]);
+                        }
+                    }
+                    if (k2it_academic_degree.Contains("Доктор") || k2it_academic_degree.Contains("Кандидат"))
+                    {
+                        ws.Cell(counter, 5).SetValue<string>(k2it_academic_degree.Contains("Доктор") && k2it_academic_degree.Contains("Кандидат") || k2it_academic_degree.Contains("Доктор") ? "Доктор" : "Кандидат");
+                    }
+                    //При наличии значений PhD и Dr. habil, актальное Dr. habil
+                    if (k2it_academic_degree.Contains("PhD") || k2it_academic_degree.Contains("Dr"))
+                    {
+                        ws.Cell(counter, 6).SetValue<string>(k2it_academic_degree.Contains("PhD") && k2it_academic_degree.Contains("Dr") || k2it_academic_degree.Contains("Dr") ? "Dr. habil" : "PhD");
+                    }
+                    //Ученое звание
+                    string k2it_academic_title = "";
+                    var k2it_academic_titleFetch = context.AdvancedSearchFetch(
+                                string.Format(_academic_titleQuery, cont.ContactId)).Entities
+                                .Select(le => (k2it_teacher_academic_title)le);
+                    foreach (k2it_teacher_academic_title title in k2it_academic_titleFetch)
+                    {
+                        if (!k2it_academic_title.Contains(title.FormattedValues["k2it_title"].ToString()))
+                        {
+                            k2it_academic_title += string.Format("{0}; ", title.FormattedValues["k2it_title"].ToString());
+                        }
+                    }
+                    ws.Cell(counter, 7).SetValue<string>(k2it_academic_title.Contains("Профессор") ? "Профессор" : k2it_academic_title.Contains("Доцент") ? "Доцент" : "Старший научный сотрудник");
+                    //Члены РАН
+                    ws.Cell(counter, 8).SetValue<string>(cont.FormattedValues.ContainsKey("ntrlab_ras_level") && cont.FormattedValues["ntrlab_ras_level"] != null ? cont.FormattedValues["ntrlab_ras_level"].ToString() : "");
+                    //Иностранные ВКС
+                    ws.Cell(counter, 9).SetValue<string>(cont.FormattedValues.ContainsKey("ntrlab_vkis") && cont.FormattedValues["ntrlab_vkis"] == "Да" ? "Да" : "");
+                    //Почетные звания
+                    //Ордена, Медали
+                    //Благодарности, премии
+                    //Делаем отдельный фетч запрос count
+                    string ntrlab_form1 = "<condition attribute='ntrlab_form' operator='eq' value='11' />";
+                    var teacher_honorary1 = context.AdvancedSearchFetch(
+                    string.Format(_honoraryQuery, ntrlab_form1, cont.Id)).Entities.First();
+                    if (teacher_honorary1.Attributes.ContainsKey("recordcount") && ((AliasedValue)teacher_honorary1.Attributes["recordcount"]).Value != null && (int)((AliasedValue)teacher_honorary1.Attributes["recordcount"]).Value != 0)
+                    {
+                        ws.Cell(counter, 10).SetValue<int>((int)((AliasedValue)teacher_honorary1.Attributes["recordcount"]).Value);
+                    }
+                    string ntrlab_form2 = @"<filter type='or'>
+                                            <condition attribute='ntrlab_form' operator='eq' value='5' />
+                                            <condition attribute='ntrlab_form' operator='eq' value='2' />
+                                        </filter>";
+                    var teacher_honorary2 = context.AdvancedSearchFetch(
+                    string.Format(_honoraryQuery, ntrlab_form2, cont.Id)).Entities.First();
+                    if (teacher_honorary2.Attributes.ContainsKey("recordcount") && ((AliasedValue)teacher_honorary2.Attributes["recordcount"]).Value != null && (int)((AliasedValue)teacher_honorary2.Attributes["recordcount"]).Value != 0)
+                    {
+                        ws.Cell(counter, 11).SetValue<int>((int)((AliasedValue)teacher_honorary2.Attributes["recordcount"]).Value);
+                    }
+                    string ntrlab_form3 = @"<filter type='or'>
+                                            <condition attribute='ntrlab_form' operator='eq' value='4' />
+                                            <condition attribute='ntrlab_form' operator='eq' value='14' />
+                                        </filter>";
+                    var teacher_honorary3 = context.AdvancedSearchFetch(
+                    string.Format(_honoraryQuery, ntrlab_form3, cont.Id)).Entities.First();
+                    if (teacher_honorary3.Attributes.ContainsKey("recordcount") && ((AliasedValue)teacher_honorary3.Attributes["recordcount"]).Value != null && (int)((AliasedValue)teacher_honorary3.Attributes["recordcount"]).Value != 0)
+                    {
+                        ws.Cell(counter, 12).SetValue<int>((int)((AliasedValue)teacher_honorary3.Attributes["recordcount"]).Value);
+                    }
+                    //Участники всероссийских  профессиональных конкурсов
+                    //Участники международных  профессиональных конкурсов
+                    string ntrlab_professionalcompetition = "";
+                    var ntrlab_professionalcompetitionFetch = context.AdvancedSearchFetch(
+                                string.Format(_professionalcompetitionQuery, cont.Id)).Entities
+                                .Select(le => (ntrlab_professionalcompetition)le);
+                    foreach (ntrlab_professionalcompetition competition in ntrlab_professionalcompetitionFetch)
+                    {
+                        if (competition.FormattedValues.ContainsKey("ntrlab_status") && competition.FormattedValues["ntrlab_status"] != null)
+                        {
+                            ntrlab_professionalcompetition += string.Format("{0}; ", competition.FormattedValues["ntrlab_status"]);
+                        }
+                    }
+                    if (ntrlab_professionalcompetition.Contains("Всероссийский"))
+                    {
+                        ws.Cell(counter, 13).SetValue<string>("Да");
+                    }
+                    if (ntrlab_professionalcompetition.Contains("Международный"))
+                    {
+                        ws.Cell(counter, 14).SetValue<string>("Да");
+                    }
+                    counter++;
+                }
+            }
+            #endregion
+            return wb;
+        }
+
+
+        //фетч запрос для всех подразделений сотрудника
+        private const string _allContactDeparmentQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='k2it_position'>
+    <attribute name='k2it_positionid' />
+    <attribute name='k2it_name' />
+    <attribute name='k2it_employment_type' />
+    <order attribute='k2it_name' descending='false' />
+    <filter type='and'>
+      <condition attribute='k2it_contact' operator='eq' uitype='contact' value='{{{0}}}' />
+    </filter>
+    <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_department' alias='ba' link-type='outer'>
+	  <attribute name='k2it_name' />
+      <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_root_department' alias='bb' link-type='outer'>
+		<attribute name='k2it_name' />
+      </link-entity>
+    </link-entity>
+  </entity>
+</fetch>";
+        //фетч запрос для получения кол-ва наград
+        private const string _honoraryQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='false' aggregate='true'>
+  <entity name='k2it_teacher_honorary_title'>
+    <attribute name='k2it_teacher_honorary_titleid' alias='recordcount' aggregate='count'/>
+    <filter type='and'>
+      <filter type='and'>
+        <filter type='or'>
+          <condition attribute='ntrlab_class' operator='eq' value='1' />
+          <condition attribute='ntrlab_class' operator='eq' value='2' />
+        </filter>
+        {0}
+      </filter>
+    </filter>
+    <link-entity name='contact' from='contactid' to='k2it_teacher' alias='ad'>
+      <filter type='and'>
+        <condition attribute='contactid' operator='eq' uitype='contact' value='{{{1}}}' />
+      </filter>
+    </link-entity>
+  </entity>
+</fetch>";
+        //фетч запрос для получения всех сотрудников подразделения с необходмыми данными не используется
+        private const string _departmentQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    {2}
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <attribute name='k2it_name' />
+        <attribute name='k2it_positionnametext' />
+        <attribute name='k2it_employment_type' />
+        <attribute name='k2it_rate' />
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+        <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_department' alias='ag' link-type='outer'>
+            <attribute name='k2it_name' />
+            <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_root_department' alias='ax' link-type='outer'>
+                <attribute name='k2it_name' />
+            </link-entity>
+            <link-entity name='k2it_branch' from='k2it_branchid' to='k2it_branch' alias='az' link-type='outer'>
+                <attribute name='k2it_name' />
+            </link-entity>
+        </link-entity>
+    </link-entity>
+    {1}
+  </entity>
+</fetch>";
+        //фетч запрос для получения данных по отчету Научный рейтинг
+        private const string _scientificRatingQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <attribute name='ntrlab_science_rating' />
+    <attribute name='ntrlab_premium' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <attribute name='k2it_positionnametext' />
+        <attribute name='k2it_employment_type' />
+        <attribute name='k2it_rate' />
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+        <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_department' alias='ag' link-type='outer'>
+            <attribute name='k2it_name' />
+            <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_root_department' alias='ax' link-type='outer'>
+                <attribute name='k2it_name' />
+            </link-entity>
+            <link-entity name='k2it_branch' from='k2it_branchid' to='k2it_branch' alias='az' link-type='outer'>
+                <attribute name='k2it_name' />
+            </link-entity>
+        </link-entity>
+    </link-entity>
+    {1}
+  </entity>
+</fetch>";
+        //фетч запрос для получения данных по отчету Педагогический рейтинг
+        private const string _educationalRatingQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <attribute name='ntrlab_rating' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <attribute name='k2it_positionnametext' />
+        <attribute name='k2it_employment_type' />
+        <attribute name='k2it_rate' />
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+        <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_department' alias='ag' link-type='outer'>
+            <attribute name='k2it_name' />
+            <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_root_department' alias='ax' link-type='outer'>
+                <attribute name='k2it_name' />
+                <filter type='and'>
+                  <condition attribute='k2it_study_department' operator='eq' value='1' />
+                </filter>
+            </link-entity>
+            <link-entity name='k2it_branch' from='k2it_branchid' to='k2it_branch' alias='az' link-type='outer'>
+                <attribute name='k2it_name' />
+            </link-entity>
+        </link-entity>
+    </link-entity>
+    {1}
+  </entity>
+</fetch>";
+        //фетч запрос для получения данных по отчету Участие в конференции
+        private const string _conferenceParticipationQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+    </link-entity>
+    {1}
+  </entity>
+</fetch>";
+
+        
+        //фетч запрос для получения данных по отчету Повышение квалификации
+        private const string _trainingQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+    </link-entity>
+    <link-entity name='k2it_advanced_training' from='k2it_teacher' to='contactid' alias='ab'>
+        <attribute name='k2it_name' />
+        <attribute name='k2it_finish_date' />
+        <attribute name='k2it_training_type' />
+        <attribute name='k2it_hours' />
+        <filter type='and'>
+            {1}
+        </filter>
+    </link-entity>
+  </entity>
+</fetch>";
+
+
+
+        //фетч запрос для получения данных по отчету Участие в публичных мероприятиях
+        private const string _publicEventsQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+    </link-entity>
+    <link-entity name='ntrlab_publicevents_participation' from='ntrlab_teacher' to='contactid' alias='dl'>
+      <attribute name='ntrlab_theme' />
+      <attribute name='ntrlab_date' />
+      <attribute name='ntrlab_type' />
+      <attribute name='ntrlab_name' />
+      <attribute name='ntrlab_status' />
+      <attribute name='ntrlab_city' />
+      <attribute name='ntrlab_organizer' />
+      <attribute name='ntrlab_url' />
+      <filter type='and'>
+        {1}
+      </filter>
+      <link-entity name='k2it_country' from='k2it_countryid' to='ntrlab_country' alias='dx' link-type='outer'>
+        <attribute name='k2it_name' />
+      </link-entity>
+    </link-entity>
+  </entity>
+</fetch>";
+
+        //фетч запрос для получения данных по отчету Участие в проф конкурсах
+        private const string _professionalContestsQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+    </link-entity>
+    <link-entity name='ntrlab_professionalcompetition' from='ntrlab_teacher' to='contactid' alias='dk'>
+      <attribute name='ntrlab_year' />
+      <attribute name='ntrlab_status' />
+      <attribute name='ntrlab_name' />
+      <attribute name='ntrlab_founder' />
+      <attribute name='ntrlab_result' />
+      <filter type='and'>
+        {1}
+      </filter>
+      <link-entity name='k2it_country' from='k2it_countryid' to='ntrlab_country' alias='dx' link-type='outer'>
+        <attribute name='k2it_name' />
+      </link-entity>
+    </link-entity>
+  </entity>
+</fetch>";
+
+        //фетч запрос для получения данных по отчету Награды, почетные звания
+        private const string _awardsQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+    </link-entity>
+    <link-entity name='k2it_teacher_honorary_title' from='k2it_teacher' to='contactid' alias='cz'>
+      <attribute name='k2it_year' />
+      <attribute name='ntrlab_fullname_text' />
+      <attribute name='ntrlab_class' />
+      <attribute name='ntrlab_form' />
+      <attribute name='ntrlab_founder_text' />
+      <attribute name='k2it_country' />
+      <attribute name='k2it_description' />
+      <attribute name='ntrlab_honorary_title' />
+      <filter type='and'>
+        {1}
+      </filter>
+      <link-entity name='k2it_country' from='k2it_countryid' to='ntrlab_country' alias='cx' link-type='outer'>
+        <attribute name='k2it_name' />
+      </link-entity>
+    </link-entity>
+  </entity>
+</fetch>";
+
+        //фетч запрос для получения данных по отчету Авторство РИД
+        private const string _authorshipRidQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+    </link-entity>
+    <link-entity name='k2it_noed_participation' from='k2it_teacher' to='contactid' alias='cj'>
+        <attribute name='k2it_affiliation' />
+        <attribute name='k2it_name' />
+        <link-entity name='k2it_noed' from='k2it_noedid' to='k2it_noed' alias='ck'>
+            <attribute name='k2it_type' />
+            <attribute name='k2it_date' />
+            <attribute name='k2it_document_type' />
+            <attribute name='k2it_document_number' />
+            <attribute name='k2it_academic' />
+            <filter type='and'>
+                {1}
+            </filter>
+            <link-entity name='k2it_research' from='k2it_researchid' to='k2it_research' alias='co' link-type='outer'>
+                <attribute name='k2it_name' />
+            </link-entity>
+        </link-entity>
+    </link-entity>
+  </entity>
+</fetch>";
+
+        //фетч запрос для получения данных по отчету Участие в проектах
+        private const string _participationProjectsQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+    </link-entity>
+    <link-entity name='k2it_teacher_research_participation' from='k2it_teacher' to='contactid' alias='cb'>
+      <attribute name='k2it_type' />
+      <link-entity name='k2it_research' from='k2it_researchid' to='k2it_research' alias='cc'>
+        <attribute name='k2it_year_start' />
+        <attribute name='k2it_date_of_expiration' />
+        <attribute name='k2it_type' />
+        <attribute name='k2it_theme_number' />
+        <attribute name='k2it_name' />
+        <attribute name='k2it_level' />
+        <attribute name='k2it_academic_project' />
+        <attribute name='k2it_is_state_task' />
+        <attribute name='k2it_top100' />
+        <attribute name='k2it_foreign_specialist' />
+        <filter type='and'>
+          {1}
+        </filter>
+      </link-entity>
+    </link-entity>
+  </entity>
+</fetch>";
+
+        //фетч запрос для получения данных по отчету Научное руководство
+        private const string _scientificGuidanceQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+        <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_department' alias='ag' link-type='outer'>
+            <attribute name='k2it_name' />
+            <filter type='and'>
+              <condition attribute='ntrlab_science_department' operator='eq' value='1' />
+            </filter>
+        </link-entity>
+    </link-entity>
+    <link-entity name='k2it_teacher_academic_advising' from='k2it_teacher' to='contactid' alias='ca'>
+        <attribute name='k2it_academic_status' />
+        <attribute name='k2it_type' />
+        <attribute name='ntrlab_date' />
+        <attribute name='k2it_theme' />
+        <attribute name='k2it_description' />
+        <attribute name='k2it_department' />
+        <filter type='and'>
+            {1}
+        </filter>
+    </link-entity>
+  </entity>
+</fetch>";
+        //фетч запрос для получения данных по отчету Авторство публикаций
+        private const string _authorPublicationQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <attribute name='k2it_spin' />
+    <attribute name='k2it_orcid' />
+    <attribute name='k2it_researcherid' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+    </link-entity>
+    <link-entity name='k2it_article_participation' from='k2it_teacher' to='contactid' alias='bc'>
+        <attribute name='k2it_coauthor_organization' />
+        <attribute name='k2it_type' />
+        <link-entity name='k2it_article' from='k2it_articleid' to='k2it_article' alias='bd'>
+            <attribute name='k2it_articleid' />
+            <attribute name='k2it_name' />
+            <attribute name='k2it_type' />
+            <attribute name='k2it_authors' />
+            <attribute name='k2it_publisher_name' />
+            <attribute name='k2it_isbn' />
+            <attribute name='k2it_printing_house' />
+            <attribute name='k2it_issue' />
+            <attribute name='k2it_volume' />
+            <attribute name='k2it_year' />
+            <attribute name='k2it_month' />
+            <attribute name='k2it_page_numbers' />
+            <attribute name='k2it_language' />
+            <attribute name='k2it_doi' />
+            <attribute name='k2it_has_signature' />
+            <attribute name='ntrlab_reviewers' />
+            <attribute name='k2it_page_count' />
+            <attribute name='k2it_list_count' />
+            <attribute name='k2it_vak' />
+            <attribute name='k2it_is_rinc' />
+            <attribute name='k2it_journal_index' />
+            <attribute name='k2it_scopus' />
+            <attribute name='ntrlab_quartile_scopus' />
+            <attribute name='k2it_wos' />
+            <attribute name='ntrlab_quartile_wos' />
+            <attribute name='ntrlab_elibrary' />
+            <attribute name='k2it_repec' />
+            <attribute name='k2it_rsci_core_collection' />
+            <attribute name='k2it_erich' />
+            <attribute name='k2it_science_field' />
+            <attribute name='k2it_rf_gost' />
+            <attribute name='k2it_repository_link_repec' />
+            <attribute name='k2it_repository_link_ssrn' />
+            <attribute name='k2it_links' />
+            <attribute name='k2it_keywords' />
+            <attribute name='k2it_ssrn' />
+            <filter type='and'>
+                {1}
+            </filter>
+            <link-entity name='k2it_foreign_language' from='k2it_foreign_languageid' to='k2it_language' alias='ba' link-type='outer'>
+                <attribute name='k2it_name' />
+            </link-entity>
+            <link-entity name='k2it_research' from='k2it_researchid' to='k2it_research' alias='bx' link-type='outer'>
+                <attribute name='k2it_name' />
+                <attribute name='k2it_is_state_task' />
+	            <attribute name='k2it_academic_project' />
+	            <attribute name='k2it_theme_number' />
+	            <attribute name='k2it_year_start' />
+            </link-entity>
+        </link-entity>
+    </link-entity>
+  </entity>
+</fetch>";
+
+        //фетч запрос для получения данных по отчету Публикации
+        private const string _publicationsQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+    </link-entity>
+    <link-entity name='k2it_article_participation' from='k2it_teacher' to='contactid' alias='bc'>
+        <attribute name='k2it_coauthor_organization' />
+        <attribute name='k2it_type' />
+        <link-entity name='k2it_article' from='k2it_articleid' to='k2it_article' alias='bd'>
+            <attribute name='k2it_articleid' />
+            <attribute name='k2it_name' />
+            <attribute name='k2it_type' />
+            <attribute name='k2it_authors' />
+            <attribute name='k2it_publisher_name' />
+            <attribute name='k2it_isbn' />
+            <attribute name='k2it_printing_house' />
+            <attribute name='k2it_issue' />
+            <attribute name='k2it_volume' />
+            <attribute name='k2it_year' />
+            <attribute name='k2it_month' />
+            <attribute name='k2it_page_numbers' />
+            <attribute name='k2it_language' />
+            <attribute name='k2it_doi' />
+            <attribute name='k2it_has_signature' />
+            <attribute name='ntrlab_reviewers' />
+            <attribute name='k2it_page_count' />
+            <attribute name='k2it_list_count' />
+            <attribute name='k2it_vak' />
+            <attribute name='k2it_is_rinc' />
+            <attribute name='k2it_journal_index' />
+            <attribute name='k2it_scopus' />
+            <attribute name='ntrlab_quartile_scopus' />
+            <attribute name='k2it_wos' />
+            <attribute name='ntrlab_quartile_wos' />
+            <attribute name='ntrlab_elibrary' />
+            <attribute name='k2it_repec' />
+            <attribute name='k2it_rsci_core_collection' />
+            <attribute name='k2it_erich' />
+            <attribute name='k2it_science_field' />
+            <attribute name='k2it_rf_gost' />
+            <attribute name='k2it_repository_link_repec' />
+            <attribute name='k2it_repository_link_ssrn' />
+            <attribute name='k2it_links' />
+            <attribute name='k2it_keywords' />
+            <attribute name='k2it_ssrn' />
+            <filter type='and'>
+                {1}
+            </filter>
+            <link-entity name='k2it_foreign_language' from='k2it_foreign_languageid' to='k2it_language' alias='ba' link-type='outer'>
+                <attribute name='k2it_name' />
+            </link-entity>
+            <link-entity name='k2it_research' from='k2it_researchid' to='k2it_research' alias='bx' link-type='outer'>
+                <attribute name='k2it_name' />
+                <attribute name='k2it_is_state_task' />
+	            <attribute name='k2it_academic_project' />
+	            <attribute name='k2it_theme_number' />
+	            <attribute name='k2it_year_start' />
+            </link-entity>
+        </link-entity>
+    </link-entity>
+  </entity>
+</fetch>";
+
+        
+        //фетч запрос для получения всех сотрудников подразделения с необходмыми данными
+        private const string _depListReportQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='contact'>
+    <attribute name='fullname' />
+    <attribute name='contactid' />
+    <attribute name='ntrlab_ras_level' />
+    <order attribute='fullname' descending='false' />
+    <filter type='and'>
+      <condition attribute='statecode' operator='eq' value='0' />
+    </filter>
+    <link-entity name='k2it_position' from='k2it_contact' to='contactid' alias='ac'>
+        <attribute name='k2it_name' />
+        <attribute name='k2it_positionnametext' />
+        <attribute name='k2it_employment_type' />
+        <attribute name='k2it_rate' />
+        <filter type='and'>
+            <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
+        </filter>
+        <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_department' alias='ag' link-type='outer'>
+            <attribute name='k2it_name' />
+        </link-entity>
+    </link-entity>
+  </entity>
+</fetch>";
+
+        //получение ученых степеней
+        private const string _academic_degreeQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='k2it_teacher_academic_degree'>
+    <attribute name='k2it_teacher_academic_degreeid' />
+	<attribute name='k2it_academic_degree' />
+    <attribute name='k2it_name' />
+    <attribute name='createdon' />
+    <order attribute='k2it_name' descending='false' />
+    <filter type='and'>
+      <condition attribute='k2it_teacher' operator='eq' uitype='contact' value='{{{0}}}' />
+    </filter>
+  </entity>
+</fetch>";
+
+        //получение ученых званий
+        private const string _academic_titleQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='k2it_teacher_academic_title'>
+    <attribute name='k2it_teacher_academic_titleid' />
+    <attribute name='k2it_name' />
+    <attribute name='k2it_title' />
+    <attribute name='createdon' />
+    <order attribute='k2it_name' descending='false' />
+    <filter type='and'>
+      <condition attribute='k2it_teacher' operator='eq' uitype='contact' value='{{{0}}}' />
+    </filter>
+  </entity>
+</fetch>";
+
+        //Получение статуса в сущности профессиональные конкурсы
+        private const string _professionalcompetitionQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='ntrlab_professionalcompetition'>
+    <attribute name='ntrlab_professionalcompetitionid' />
+    <attribute name='ntrlab_name' />
+    <attribute name='ntrlab_status' />
+    <attribute name='createdon' />
+    <order attribute='ntrlab_name' descending='false' />
+    <filter type='and'>
+      <filter type='and'>
+        <condition attribute='ntrlab_teacher' operator='eq' uitype='contact' value='{{{0}}}' />
+        <filter type='or'>
+          <condition attribute='ntrlab_status' operator='eq' value='2' />
+          <condition attribute='ntrlab_status' operator='eq' value='3' />
+        </filter>
+      </filter>
+    </filter>
+  </entity>
+</fetch>";
+        //Полуение проектов не используется
+        private const string _researchQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
+  <entity name='k2it_research'>
+    <attribute name='k2it_researchid' />
+    <attribute name='k2it_name' />
+    <attribute name='k2it_theme_number' />
+    <attribute name='k2it_is_state_task' />
+    <attribute name='k2it_academic_project' />
+    <attribute name='createdon' />
+    <order attribute='k2it_name' descending='false' />
+    <link-entity name='k2it_teacher_research_participation' from='k2it_research' to='k2it_researchid' alias='db'>
+      <filter type='and'>
+        <condition attribute='k2it_teacher' operator='eq' uitype='contact' value='{{{0}}}' />
+      </filter>
+    </link-entity>
+  </entity>
+</fetch>";
+        
+    }
+}
