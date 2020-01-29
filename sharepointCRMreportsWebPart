@@ -4,8 +4,6 @@ using System.Web.UI.WebControls;
 using Microsoft.Xrm.Sdk;
 using System.Collections.Generic;
 using System.Linq;
-using K2IT.ranepa.Profiles.Controls.Data;
-using K2IT.ranepa.Profiles.Controls.Security;
 using System.IO;
 using System.IO.Compression;
 using ClosedXML.Excel;
@@ -457,10 +455,10 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 {
                     
                     string conditionFrom = calendarInputMYFrom.Value != String.Empty ? string.Format(@"
-                                            <condition attribute='ntrlab_publication_date' operator='on-or-after' value='{0}' />",
+                                            <condition attribute='xxxxx_publication_date' operator='on-or-after' value='{0}' />",
                                             DateTime.Parse(calendarInputMYFrom.Value).ToString("yyyy-MM-dd")) : "";
                     string conditionTo = calendarInputMYTo.Value != String.Empty ? string.Format(@"
-                                            <condition attribute='ntrlab_publication_date' operator='on-or-before' value='{0}' />",
+                                            <condition attribute='xxxxx_publication_date' operator='on-or-before' value='{0}' />",
                                             DateTime.Parse(calendarInputMYTo.Value).ToString("yyyy-MM-dd")) : "";
                     additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
                     _query = _authorPublicationQuery;
@@ -469,10 +467,10 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 if (type == "scientificGuidance")
                 {
                     string conditionFrom = calendarInputFrom.Value != String.Empty ? string.Format(@"
-                                            <condition attribute='ntrlab_date' operator='on-or-after' value='{0}' />",
+                                            <condition attribute='xxxxx_date' operator='on-or-after' value='{0}' />",
                                             DateTime.Parse(calendarInputFrom.Value).ToString("yyyy-MM-dd")) : "";
                     string conditionTo = calendarInputTo.Value != String.Empty ? string.Format(@"
-                                            <condition attribute='ntrlab_date' operator='on-or-before' value='{0}' />",
+                                            <condition attribute='xxxxx_date' operator='on-or-before' value='{0}' />",
                                             DateTime.Parse(calendarInputTo.Value).ToString("yyyy-MM-dd")) : "";
                     additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
                     _query = _scientificGuidanceQuery;
@@ -481,15 +479,15 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 if (type == "conferenceParticipation")
                 {
                     string conditionFrom = calendarInputFrom.Value != String.Empty ? string.Format(@"
-                                            <condition attribute='ntrlab_date' operator='on-or-after' value='{0}' />",
+                                            <condition attribute='xxxxx_date' operator='on-or-after' value='{0}' />",
                                            DateTime.Parse(calendarInputFrom.Value).ToString("yyyy-MM-dd")) : "";
                     string conditionTo = calendarInputTo.Value != String.Empty ? string.Format(@"
-                                            <condition attribute='ntrlab_date' operator='on-or-before' value='{0}' />",
+                                            <condition attribute='xxxxx_date' operator='on-or-before' value='{0}' />",
                                             DateTime.Parse(calendarInputTo.Value).ToString("yyyy-MM-dd")) : "";
                     additionalCondition = string.Format(@"<link-entity name='k2it_conference_participation' from='k2it_teacher' to='contactid' alias='da'>
                                                               <attribute name='k2it_type' />
                                                               <attribute name='k2it_theme' />
-                                                              <attribute name='ntrlab_date' />
+                                                              <attribute name='xxxxx_date' />
                                                               <attribute name='k2it_affiliation' />
                                                               <filter type='and'>
                                                                 {0}
@@ -515,26 +513,26 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                                                               </link-entity>
                                                             </link-entity>", conditionFrom, conditionTo);
 
-                    secondAdditionalCondition = string.Format(@"<link-entity name='ntrlab_gaidar_forum_event_participation' from='ntrlab_teacher' to='contactid' alias='fa'>
-                                                                  <attribute name='ntrlab_type' />
-                                                                  <link-entity name='ntrlab_gaidar_forum_event' from='ntrlab_gaidar_forum_eventid' to='ntrlab_event' alias='fb'>
-                                                                    <attribute name='ntrlab_date' />
-                                                                    <attribute name='ntrlab_type' />
-                                                                    <attribute name='ntrlab_name' />
+                    secondAdditionalCondition = string.Format(@"<link-entity name='xxxxx_gaidar_forum_event_participation' from='xxxxx_teacher' to='contactid' alias='fa'>
+                                                                  <attribute name='xxxxx_type' />
+                                                                  <link-entity name='xxxxx_gaidar_forum_event' from='xxxxx_gaidar_forum_eventid' to='xxxxx_event' alias='fb'>
+                                                                    <attribute name='xxxxx_date' />
+                                                                    <attribute name='xxxxx_type' />
+                                                                    <attribute name='xxxxx_name' />
                                                                     <filter type='and'>
                                                                       {0}
                                                                       {1}
                                                                     </filter>
-                                                                    <link-entity name='ntrlab_gaidar_forum' from='ntrlab_gaidar_forumid' to='ntrlab_gaidar_forum' alias='fc' link-type='outer'>
-                                                                        <attribute name='ntrlab_type' />
-                                                                        <attribute name='ntrlab_foundation' />
-                                                                        <attribute name='ntrlab_name' />
-                                                                        <attribute name='ntrlab_location' />
-                                                                        <attribute name='ntrlab_date_start' />
-                                                                        <attribute name='ntrlab_date_end' />
-                                                                        <attribute name='ntrlab_status' />
-                                                                        <attribute name='ntrlab_language' />
-                                                                        <attribute name='ntrlab_url' />
+                                                                    <link-entity name='xxxxx_gaidar_forum' from='xxxxx_gaidar_forumid' to='xxxxx_gaidar_forum' alias='fc' link-type='outer'>
+                                                                        <attribute name='xxxxx_type' />
+                                                                        <attribute name='xxxxx_foundation' />
+                                                                        <attribute name='xxxxx_name' />
+                                                                        <attribute name='xxxxx_location' />
+                                                                        <attribute name='xxxxx_date_start' />
+                                                                        <attribute name='xxxxx_date_end' />
+                                                                        <attribute name='xxxxx_status' />
+                                                                        <attribute name='xxxxx_language' />
+                                                                        <attribute name='xxxxx_url' />
                                                                     </link-entity>
                                                                   </link-entity>
                                                                 </link-entity>", conditionFrom, conditionTo);
@@ -554,10 +552,10 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 if (type == "publications")
                 {
                     string conditionFrom = calendarInputMYFrom.Value != String.Empty ? string.Format(@"
-                                            <condition attribute='ntrlab_publication_date' operator='on-or-after' value='{0}' />",
+                                            <condition attribute='xxxxx_publication_date' operator='on-or-after' value='{0}' />",
                                             DateTime.Parse(calendarInputMYFrom.Value).ToString("yyyy-MM-dd")) : "";
                     string conditionTo = calendarInputMYTo.Value != String.Empty ? string.Format(@"
-                                            <condition attribute='ntrlab_publication_date' operator='on-or-before' value='{0}' />",
+                                            <condition attribute='xxxxx_publication_date' operator='on-or-before' value='{0}' />",
                                             DateTime.Parse(calendarInputMYTo.Value).ToString("yyyy-MM-dd")) : "";
                     additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
                     _query = _publicationsQuery;
@@ -614,10 +612,10 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 if (type == "professionalContests")
                 {
                     string conditionFrom = ddlYearFrom.SelectedValue != "All" ? string.Format(@"
-                                            <condition attribute='ntrlab_year' operator='ge' value='{0}' />",
+                                            <condition attribute='xxxxx_year' operator='ge' value='{0}' />",
                                             ddlYearFrom.SelectedValue) : "";
                     string conditionTo = ddlYearTo.SelectedValue != "All" ? string.Format(@"
-                                            <condition attribute='ntrlab_year' operator='le' value='{0}' />",
+                                            <condition attribute='xxxxx_year' operator='le' value='{0}' />",
                                             ddlYearTo.SelectedValue) : "";
                     additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
                     _query = _professionalContestsQuery;
@@ -626,10 +624,10 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 if (type == "publicEvents")
                 {
                     string conditionFrom = calendarInputFrom.Value != String.Empty ? string.Format(@"
-                                            <condition attribute='ntrlab_date' operator='on-or-after' value='{0}' />",
+                                            <condition attribute='xxxxx_date' operator='on-or-after' value='{0}' />",
                                             DateTime.Parse(calendarInputFrom.Value).ToString("yyyy-MM-dd")) : "";
                     string conditionTo = calendarInputTo.Value != String.Empty ? string.Format(@"
-                                            <condition attribute='ntrlab_date' operator='on-or-before' value='{0}' />",
+                                            <condition attribute='xxxxx_date' operator='on-or-before' value='{0}' />",
                                             DateTime.Parse(calendarInputTo.Value).ToString("yyyy-MM-dd")) : "";
                     additionalCondition = string.Format("{0}{1}", conditionFrom, conditionTo);
                     _query = _publicEventsQuery;
@@ -711,15 +709,15 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 foreach (Contact cont in contactList)
                 {
                     ws.Cell(counter, 1).SetValue<string>(cont.FullName);
-                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_theme"));
-                    ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_date"));
-                    ws.Cell(counter, 4).SetValue<string>(getFormattedValue(cont, "dl.ntrlab_type"));
-                    ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_name"));
-                    ws.Cell(counter, 6).SetValue<string>(getFormattedValue(cont, "dl.ntrlab_status"));
+                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "dl.xxxxx_theme"));
+                    ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "dl.xxxxx_date"));
+                    ws.Cell(counter, 4).SetValue<string>(getFormattedValue(cont, "dl.xxxxx_type"));
+                    ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "dl.xxxxx_name"));
+                    ws.Cell(counter, 6).SetValue<string>(getFormattedValue(cont, "dl.xxxxx_status"));
                     ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "dx.k2it_name"));
-                    ws.Cell(counter, 8).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_city"));
-                    ws.Cell(counter, 9).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_organizer"));
-                    ws.Cell(counter, 10).SetValue<string>(getAliasedValue(cont, "dl.ntrlab_url"));
+                    ws.Cell(counter, 8).SetValue<string>(getAliasedValue(cont, "dl.xxxxx_city"));
+                    ws.Cell(counter, 9).SetValue<string>(getAliasedValue(cont, "dl.xxxxx_organizer"));
+                    ws.Cell(counter, 10).SetValue<string>(getAliasedValue(cont, "dl.xxxxx_url"));
                     string mainWorkPlaceDep = "";
                     string mainWorkPlaceRootDep = "";
                     string intenalCombDep = "";
@@ -807,12 +805,12 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 foreach (Contact cont in contactList)
                 {
                     ws.Cell(counter, 1).SetValue<string>(cont.FullName);
-                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "dk.ntrlab_year"));
-                    ws.Cell(counter, 3).SetValue<string>(getFormattedValue(cont, "dk.ntrlab_status"));
-                    ws.Cell(counter, 4).SetValue<string>(getAliasedValue(cont, "dk.ntrlab_name"));
-                    ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "dk.ntrlab_founder"));
+                    ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "dk.xxxxx_year"));
+                    ws.Cell(counter, 3).SetValue<string>(getFormattedValue(cont, "dk.xxxxx_status"));
+                    ws.Cell(counter, 4).SetValue<string>(getAliasedValue(cont, "dk.xxxxx_name"));
+                    ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "dk.xxxxx_founder"));
                     ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "dx.k2it_name"));
-                    ws.Cell(counter, 7).SetValue<string>(getFormattedValue(cont, "dk.ntrlab_result"));
+                    ws.Cell(counter, 7).SetValue<string>(getFormattedValue(cont, "dk.xxxxx_result"));
                     string mainWorkPlaceDep = "";
                     string mainWorkPlaceRootDep = "";
                     string intenalCombDep = "";
@@ -903,13 +901,13 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 {
                     ws.Cell(counter, 1).SetValue<string>(cont.FullName);
                     ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "cz.k2it_year"));
-                    ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "cz.ntrlab_fullname_text"));
-                    ws.Cell(counter, 4).SetValue<string>(getFormattedValue(cont, "cz.ntrlab_class"));
-                    ws.Cell(counter, 5).SetValue<string>(getFormattedValue(cont, "cz.ntrlab_form"));
-                    ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "cz.ntrlab_founder_text"));
+                    ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "cz.xxxxx_fullname_text"));
+                    ws.Cell(counter, 4).SetValue<string>(getFormattedValue(cont, "cz.xxxxx_class"));
+                    ws.Cell(counter, 5).SetValue<string>(getFormattedValue(cont, "cz.xxxxx_form"));
+                    ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "cz.xxxxx_founder_text"));
                     ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "cx.k2it_name"));
                     ws.Cell(counter, 8).SetValue<string>(getAliasedValue(cont, "cz.k2it_description"));
-                    ws.Cell(counter, 9).SetValue<string>(getFormattedValue(cont, "cz.ntrlab_honorary_title"));
+                    ws.Cell(counter, 9).SetValue<string>(getFormattedValue(cont, "cz.xxxxx_honorary_title"));
                     string mainWorkPlaceDep = "";
                     string mainWorkPlaceRootDep = "";
                     string intenalCombDep = "";
@@ -1349,9 +1347,9 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                         ws.Cell(counter, 12).SetValue<string>(getAliasedValue(cont, "ba.k2it_name"));
                         ws.Cell(counter, 13).SetValue<string>(getAliasedValue(cont, "bd.k2it_doi"));
                         ws.Cell(counter, 15).SetValue<string>(getFormattedValue(cont, "bd.k2it_has_signature"));
-                        string ntrlab_reviewers = getAliasedValue(cont, "bd.ntrlab_reviewers");
-                        ws.Cell(counter, 16).SetValue<string>(!string.IsNullOrEmpty(ntrlab_reviewers) ? "Да" : "Нет");
-                        ws.Cell(counter, 17).SetValue<string>(ntrlab_reviewers);
+                        string xxxxx_reviewers = getAliasedValue(cont, "bd.xxxxx_reviewers");
+                        ws.Cell(counter, 16).SetValue<string>(!string.IsNullOrEmpty(xxxxx_reviewers) ? "Да" : "Нет");
+                        ws.Cell(counter, 17).SetValue<string>(xxxxx_reviewers);
                         ws.Cell(counter, 18).SetValue<string>(getAliasedValue(cont, "bd.k2it_page_count"));
                         double k2it_list_count;
                         bool succes = double.TryParse(getAliasedValue(cont, "bd.k2it_list_count"), out k2it_list_count);
@@ -1375,14 +1373,14 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                         {
                             ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "bd.k2it_isbn"));
                             ws.Cell(counter, 10).SetValue<string>(getFormattedValue(cont, "bd.k2it_month"));
-                            ws.Cell(counter, 24).SetValue<string>(k2it_scopus.Contains("Да") ? getFormattedValue(cont, "bd.ntrlab_quartile_scopus") : "");
-                            ws.Cell(counter, 26).SetValue<string>(k2it_wos.Contains("Да") ? getFormattedValue(cont, "bd.ntrlab_quartile_wos") : "");
+                            ws.Cell(counter, 24).SetValue<string>(k2it_scopus.Contains("Да") ? getFormattedValue(cont, "bd.xxxxx_quartile_scopus") : "");
+                            ws.Cell(counter, 26).SetValue<string>(k2it_wos.Contains("Да") ? getFormattedValue(cont, "bd.xxxxx_quartile_wos") : "");
                         }
                         else
                         {
                             ws.Cell(counter, 14).SetValue<string>(getAliasedValue(cont, "bd.k2it_isbn"));
                         }
-                        ws.Cell(counter, 27).SetValue<string>(getFormattedValue(cont, "bd.ntrlab_elibrary"));
+                        ws.Cell(counter, 27).SetValue<string>(getFormattedValue(cont, "bd.xxxxx_elibrary"));
                         ws.Cell(counter, 28).SetValue<string>(getFormattedValue(cont, "bd.k2it_repec"));
                         ws.Cell(counter, 29).SetValue<string>(getFormattedValue(cont, "bd.k2it_ssrn"));
                         ws.Cell(counter, 30).SetValue<string>(getFormattedValue(cont, "bd.k2it_rsci_core_collection"));
@@ -1437,8 +1435,8 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 {
                     ws.Cell(counter, 1).SetValue<string>(cont.FullName);
                     ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "ac.k2it_positionnametext"));
-                    ws.Cell(counter, 3).SetValue<string>(cont.ntrlab_science_rating != null ? double.Parse(cont.ntrlab_science_rating.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
-                    ws.Cell(counter, 4).SetValue<string>(cont.ntrlab_premium != null ? cont.ntrlab_premium.ToString() : "");
+                    ws.Cell(counter, 3).SetValue<string>(cont.xxxxx_science_rating != null ? double.Parse(cont.xxxxx_science_rating.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                    ws.Cell(counter, 4).SetValue<string>(cont.xxxxx_premium != null ? cont.xxxxx_premium.ToString() : "");
                     ws.Cell(counter, 5).SetValue<string>(getFormattedValue(cont, "ac.k2it_employment_type"));
                     ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "ac.k2it_rate") != "" ? double.Parse(getAliasedValue(cont, "ac.k2it_rate")).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
                     ws.Cell(counter, 7).SetValue<string>(getAliasedValue(cont, "ag.k2it_name"));
@@ -1477,7 +1475,7 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                 {
                     ws.Cell(counter, 1).SetValue<string>(cont.FullName);
                     ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "ac.k2it_positionnametext"));
-                    ws.Cell(counter, 3).SetValue<string>(cont.ntrlab_rating != null ? double.Parse(cont.ntrlab_rating.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
+                    ws.Cell(counter, 3).SetValue<string>(cont.xxxxx_rating != null ? double.Parse(cont.xxxxx_rating.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
                     ws.Cell(counter, 4).SetValue<string>(getFormattedValue(cont, "ac.k2it_employment_type"));
                     ws.Cell(counter, 5).SetValue<string>(getAliasedValue(cont, "ac.k2it_rate") != "" ? double.Parse(getAliasedValue(cont, "ac.k2it_rate")).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
                     ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "ag.k2it_name"));
@@ -1541,7 +1539,7 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                         ws.Cell(counter, 3).SetValue<string>(getAliasedValue(cont, "da.k2it_theme"));
                         DateTime tempDateTime;
                         var culture = CultureInfo.CreateSpecificCulture("en-US");
-                        if (DateTime.TryParse(getFormattedValue(cont, "da.ntrlab_date"), culture, DateTimeStyles.None, out tempDateTime))
+                        if (DateTime.TryParse(getFormattedValue(cont, "da.xxxxx_date"), culture, DateTimeStyles.None, out tempDateTime))
                         {
                             ws.Cell(counter, 4).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
                         }
@@ -1566,35 +1564,35 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                         ws.Cell(counter, 17).SetValue<string>(getAliasedValue(cont, "dc.k2it_languages"));
                         ws.Cell(counter, 18).SetValue<string>(getAliasedValue(cont, "dc.k2it_url"));
                     }
-                    if (getFormattedValue(cont, "fa.ntrlab_type") != "")
+                    if (getFormattedValue(cont, "fa.xxxxx_type") != "")
                     {
                         ws.Cell(counter, 1).SetValue<string>(cont.FullName);
-                        ws.Cell(counter, 2).SetValue<string>(getFormattedValue(cont, "fa.ntrlab_type"));
-                        ws.Cell(counter, 3).SetValue<string>(string.Format("{0}: {1}", getFormattedValue(cont, "fb.ntrlab_type"), getAliasedValue(cont, "fb.ntrlab_name")));
+                        ws.Cell(counter, 2).SetValue<string>(getFormattedValue(cont, "fa.xxxxx_type"));
+                        ws.Cell(counter, 3).SetValue<string>(string.Format("{0}: {1}", getFormattedValue(cont, "fb.xxxxx_type"), getAliasedValue(cont, "fb.xxxxx_name")));
                         DateTime tempDateTime;
                         var culture = CultureInfo.CreateSpecificCulture("en-US");
-                        if (DateTime.TryParse(getFormattedValue(cont, "fb.ntrlab_date"), culture, DateTimeStyles.None, out tempDateTime))
+                        if (DateTime.TryParse(getFormattedValue(cont, "fb.xxxxx_date"), culture, DateTimeStyles.None, out tempDateTime))
                         {
                             ws.Cell(counter, 4).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
                         }
                         ws.Cell(counter, 6).SetValue<string>(getAliasedValue(cont, "db.k2it_theme_number") != "" ? string.Format("{0}, {1}", getAliasedValue(cont, "db.k2it_theme_number"), getAliasedValue(cont, "db.k2it_name")) : "");
                         ws.Cell(counter, 7).SetValue<string>(getFormattedValue(cont, "db.k2it_is_state_task"));
                         ws.Cell(counter, 8).SetValue<string>(getFormattedValue(cont, "db.k2it_academic_project"));
-                        ws.Cell(counter, 9).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_type"));
-                        ws.Cell(counter, 10).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_name"));
-                        ws.Cell(counter, 11).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_foundation"));
-                        ws.Cell(counter, 12).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_location"));
-                        if (DateTime.TryParse(getFormattedValue(cont, "fc.ntrlab_date_start"), culture, DateTimeStyles.None, out tempDateTime))
+                        ws.Cell(counter, 9).SetValue<string>(getAliasedValue(cont, "fc.xxxxx_type"));
+                        ws.Cell(counter, 10).SetValue<string>(getAliasedValue(cont, "fc.xxxxx_name"));
+                        ws.Cell(counter, 11).SetValue<string>(getAliasedValue(cont, "fc.xxxxx_foundation"));
+                        ws.Cell(counter, 12).SetValue<string>(getAliasedValue(cont, "fc.xxxxx_location"));
+                        if (DateTime.TryParse(getFormattedValue(cont, "fc.xxxxx_date_start"), culture, DateTimeStyles.None, out tempDateTime))
                         {
                             ws.Cell(counter, 13).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
                         }
-                        if (DateTime.TryParse(getFormattedValue(cont, "fc.ntrlab_date_end"), culture, DateTimeStyles.None, out tempDateTime))
+                        if (DateTime.TryParse(getFormattedValue(cont, "fc.xxxxx_date_end"), culture, DateTimeStyles.None, out tempDateTime))
                         {
                             ws.Cell(counter, 14).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
                         }
-                        ws.Cell(counter, 15).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_status"));
-                        ws.Cell(counter, 17).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_language"));
-                        ws.Cell(counter, 18).SetValue<string>(getAliasedValue(cont, "fc.ntrlab_url"));
+                        ws.Cell(counter, 15).SetValue<string>(getAliasedValue(cont, "fc.xxxxx_status"));
+                        ws.Cell(counter, 17).SetValue<string>(getAliasedValue(cont, "fc.xxxxx_language"));
+                        ws.Cell(counter, 18).SetValue<string>(getAliasedValue(cont, "fc.xxxxx_url"));
                     }
                     string mainWorkPlaceDep = "";
                     string mainWorkPlaceRootDep = "";
@@ -1691,7 +1689,7 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                     ws.Cell(counter, 3).SetValue<string>(getFormattedValue(cont, "ca.k2it_type"));
                     DateTime tempDateTime;
                     var culture = CultureInfo.CreateSpecificCulture("en-US");
-                    if (DateTime.TryParse(getFormattedValue(cont, "ca.ntrlab_date"), culture, DateTimeStyles.None, out tempDateTime))
+                    if (DateTime.TryParse(getFormattedValue(cont, "ca.xxxxx_date"), culture, DateTimeStyles.None, out tempDateTime))
                     {
                         ws.Cell(counter, 4).SetValue<string>(tempDateTime.ToString("dd.MM.yyyy"));
                     }
@@ -1871,9 +1869,9 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                         ws.Cell(counter, 17).SetValue<string>(getAliasedValue(cont, "ba.k2it_name"));
                         ws.Cell(counter, 18).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_doi") && ((AliasedValue)cont.Attributes["bd.k2it_doi"]).Value != null ? ((AliasedValue)cont.Attributes["bd.k2it_doi"]).Value.ToString() : "");
                         ws.Cell(counter, 20).SetValue<string>(cont.FormattedValues.ContainsKey("bd.k2it_has_signature") && !string.IsNullOrEmpty(cont.FormattedValues["bd.k2it_has_signature"]) ? cont.FormattedValues["bd.k2it_has_signature"] : "");
-                        string ntrlab_reviewers = cont.Attributes.ContainsKey("bd.ntrlab_reviewers") && ((AliasedValue)cont.Attributes["bd.ntrlab_reviewers"]).Value != null ? ((AliasedValue)cont.Attributes["bd.ntrlab_reviewers"]).Value.ToString() : "";
-                        ws.Cell(counter, 21).SetValue<string>(!string.IsNullOrEmpty(ntrlab_reviewers) ? "Да" : "Нет");
-                        ws.Cell(counter, 22).SetValue<string>(ntrlab_reviewers);
+                        string xxxxx_reviewers = cont.Attributes.ContainsKey("bd.xxxxx_reviewers") && ((AliasedValue)cont.Attributes["bd.xxxxx_reviewers"]).Value != null ? ((AliasedValue)cont.Attributes["bd.xxxxx_reviewers"]).Value.ToString() : "";
+                        ws.Cell(counter, 21).SetValue<string>(!string.IsNullOrEmpty(xxxxx_reviewers) ? "Да" : "Нет");
+                        ws.Cell(counter, 22).SetValue<string>(xxxxx_reviewers);
                         ws.Cell(counter, 23).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_page_count") && ((AliasedValue)cont.Attributes["bd.k2it_page_count"]).Value != null ? ((AliasedValue)cont.Attributes["bd.k2it_page_count"]).Value.ToString() : "");
                         double k2it_list_count;
                         bool succes = double.TryParse(getAliasedValue(cont, "bd.k2it_list_count"), out k2it_list_count);
@@ -1897,14 +1895,14 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                         {
                             ws.Cell(counter, 11).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_isbn") ? (((AliasedValue)cont.Attributes["bd.k2it_isbn"]).Value == null ? "" : ((AliasedValue)cont.Attributes["bd.k2it_isbn"]).Value.ToString()) : "");
                             ws.Cell(counter, 15).SetValue<string>(cont.FormattedValues.ContainsKey("bd.k2it_month") && !string.IsNullOrEmpty(cont.FormattedValues["bd.k2it_month"]) ? cont.FormattedValues["bd.k2it_month"] : "");
-                            ws.Cell(counter, 29).SetValue<string>(cont.FormattedValues.ContainsKey("bd.ntrlab_quartile_scopus") && cont.FormattedValues["bd.ntrlab_quartile_scopus"] != null && k2it_scopus.Contains("Да") ? cont.FormattedValues["bd.ntrlab_quartile_scopus"] : "");
-                            ws.Cell(counter, 31).SetValue<string>(cont.FormattedValues.ContainsKey("bd.ntrlab_quartile_wos") && cont.FormattedValues["bd.ntrlab_quartile_wos"] != null && k2it_wos.Contains("Да") ? cont.FormattedValues["bd.ntrlab_quartile_wos"] : "");
+                            ws.Cell(counter, 29).SetValue<string>(cont.FormattedValues.ContainsKey("bd.xxxxx_quartile_scopus") && cont.FormattedValues["bd.xxxxx_quartile_scopus"] != null && k2it_scopus.Contains("Да") ? cont.FormattedValues["bd.xxxxx_quartile_scopus"] : "");
+                            ws.Cell(counter, 31).SetValue<string>(cont.FormattedValues.ContainsKey("bd.xxxxx_quartile_wos") && cont.FormattedValues["bd.xxxxx_quartile_wos"] != null && k2it_wos.Contains("Да") ? cont.FormattedValues["bd.xxxxx_quartile_wos"] : "");
                         }
                         else
                         {
                             ws.Cell(counter, 19).SetValue<string>(cont.Attributes.ContainsKey("bd.k2it_isbn") && !string.IsNullOrEmpty(publicationType) ? (((AliasedValue)cont.Attributes["bd.k2it_isbn"]).Value == null ? "" : ((AliasedValue)cont.Attributes["bd.k2it_isbn"]).Value.ToString()) : "");
                         }
-                        ws.Cell(counter, 32).SetValue<string>(cont.FormattedValues.ContainsKey("bd.ntrlab_elibrary") && cont.FormattedValues["bd.ntrlab_elibrary"] != null ? cont.FormattedValues["bd.ntrlab_elibrary"] : "");
+                        ws.Cell(counter, 32).SetValue<string>(cont.FormattedValues.ContainsKey("bd.xxxxx_elibrary") && cont.FormattedValues["bd.xxxxx_elibrary"] != null ? cont.FormattedValues["bd.xxxxx_elibrary"] : "");
                         ws.Cell(counter, 33).SetValue<string>(cont.FormattedValues.ContainsKey("bd.k2it_repec") && cont.FormattedValues["bd.k2it_repec"] != null ? cont.FormattedValues["bd.k2it_repec"] : "");
                         ws.Cell(counter, 34).SetValue<string>(cont.FormattedValues.ContainsKey("bd.k2it_ssrn") && cont.FormattedValues["bd.k2it_ssrn"] != null ? cont.FormattedValues["bd.k2it_ssrn"] : "");
                         ws.Cell(counter, 35).SetValue<string>(getFormattedValue(cont, "bd.k2it_rsci_core_collection"));
@@ -2106,58 +2104,58 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
                     }
                     ws.Cell(counter, 7).SetValue<string>(k2it_academic_title.Contains("Профессор") ? "Профессор" : k2it_academic_title.Contains("Доцент") ? "Доцент" : "Старший научный сотрудник");
                     //Члены РАН
-                    ws.Cell(counter, 8).SetValue<string>(cont.FormattedValues.ContainsKey("ntrlab_ras_level") && cont.FormattedValues["ntrlab_ras_level"] != null ? cont.FormattedValues["ntrlab_ras_level"].ToString() : "");
+                    ws.Cell(counter, 8).SetValue<string>(cont.FormattedValues.ContainsKey("xxxxx_ras_level") && cont.FormattedValues["xxxxx_ras_level"] != null ? cont.FormattedValues["xxxxx_ras_level"].ToString() : "");
                     //Иностранные ВКС
-                    ws.Cell(counter, 9).SetValue<string>(cont.FormattedValues.ContainsKey("ntrlab_vkis") && cont.FormattedValues["ntrlab_vkis"] == "Да" ? "Да" : "");
+                    ws.Cell(counter, 9).SetValue<string>(cont.FormattedValues.ContainsKey("xxxxx_vkis") && cont.FormattedValues["xxxxx_vkis"] == "Да" ? "Да" : "");
                     //Почетные звания
                     //Ордена, Медали
                     //Благодарности, премии
                     //Делаем отдельный фетч запрос count
-                    string ntrlab_form1 = "<condition attribute='ntrlab_form' operator='eq' value='11' />";
+                    string xxxxx_form1 = "<condition attribute='xxxxx_form' operator='eq' value='11' />";
                     var teacher_honorary1 = context.AdvancedSearchFetch(
-                    string.Format(_honoraryQuery, ntrlab_form1, cont.Id)).Entities.First();
+                    string.Format(_honoraryQuery, xxxxx_form1, cont.Id)).Entities.First();
                     if (teacher_honorary1.Attributes.ContainsKey("recordcount") && ((AliasedValue)teacher_honorary1.Attributes["recordcount"]).Value != null && (int)((AliasedValue)teacher_honorary1.Attributes["recordcount"]).Value != 0)
                     {
                         ws.Cell(counter, 10).SetValue<int>((int)((AliasedValue)teacher_honorary1.Attributes["recordcount"]).Value);
                     }
-                    string ntrlab_form2 = @"<filter type='or'>
-                                            <condition attribute='ntrlab_form' operator='eq' value='5' />
-                                            <condition attribute='ntrlab_form' operator='eq' value='2' />
+                    string xxxxx_form2 = @"<filter type='or'>
+                                            <condition attribute='xxxxx_form' operator='eq' value='5' />
+                                            <condition attribute='xxxxx_form' operator='eq' value='2' />
                                         </filter>";
                     var teacher_honorary2 = context.AdvancedSearchFetch(
-                    string.Format(_honoraryQuery, ntrlab_form2, cont.Id)).Entities.First();
+                    string.Format(_honoraryQuery, xxxxx_form2, cont.Id)).Entities.First();
                     if (teacher_honorary2.Attributes.ContainsKey("recordcount") && ((AliasedValue)teacher_honorary2.Attributes["recordcount"]).Value != null && (int)((AliasedValue)teacher_honorary2.Attributes["recordcount"]).Value != 0)
                     {
                         ws.Cell(counter, 11).SetValue<int>((int)((AliasedValue)teacher_honorary2.Attributes["recordcount"]).Value);
                     }
-                    string ntrlab_form3 = @"<filter type='or'>
-                                            <condition attribute='ntrlab_form' operator='eq' value='4' />
-                                            <condition attribute='ntrlab_form' operator='eq' value='14' />
+                    string xxxxx_form3 = @"<filter type='or'>
+                                            <condition attribute='xxxxx_form' operator='eq' value='4' />
+                                            <condition attribute='xxxxx_form' operator='eq' value='14' />
                                         </filter>";
                     var teacher_honorary3 = context.AdvancedSearchFetch(
-                    string.Format(_honoraryQuery, ntrlab_form3, cont.Id)).Entities.First();
+                    string.Format(_honoraryQuery, xxxxx_form3, cont.Id)).Entities.First();
                     if (teacher_honorary3.Attributes.ContainsKey("recordcount") && ((AliasedValue)teacher_honorary3.Attributes["recordcount"]).Value != null && (int)((AliasedValue)teacher_honorary3.Attributes["recordcount"]).Value != 0)
                     {
                         ws.Cell(counter, 12).SetValue<int>((int)((AliasedValue)teacher_honorary3.Attributes["recordcount"]).Value);
                     }
                     //Участники всероссийских  профессиональных конкурсов
                     //Участники международных  профессиональных конкурсов
-                    string ntrlab_professionalcompetition = "";
-                    var ntrlab_professionalcompetitionFetch = context.AdvancedSearchFetch(
+                    string xxxxx_professionalcompetition = "";
+                    var xxxxx_professionalcompetitionFetch = context.AdvancedSearchFetch(
                                 string.Format(_professionalcompetitionQuery, cont.Id)).Entities
-                                .Select(le => (ntrlab_professionalcompetition)le);
-                    foreach (ntrlab_professionalcompetition competition in ntrlab_professionalcompetitionFetch)
+                                .Select(le => (xxxxx_professionalcompetition)le);
+                    foreach (xxxxx_professionalcompetition competition in xxxxx_professionalcompetitionFetch)
                     {
-                        if (competition.FormattedValues.ContainsKey("ntrlab_status") && competition.FormattedValues["ntrlab_status"] != null)
+                        if (competition.FormattedValues.ContainsKey("xxxxx_status") && competition.FormattedValues["xxxxx_status"] != null)
                         {
-                            ntrlab_professionalcompetition += string.Format("{0}; ", competition.FormattedValues["ntrlab_status"]);
+                            xxxxx_professionalcompetition += string.Format("{0}; ", competition.FormattedValues["xxxxx_status"]);
                         }
                     }
-                    if (ntrlab_professionalcompetition.Contains("Всероссийский"))
+                    if (xxxxx_professionalcompetition.Contains("Всероссийский"))
                     {
                         ws.Cell(counter, 13).SetValue<string>("Да");
                     }
-                    if (ntrlab_professionalcompetition.Contains("Международный"))
+                    if (xxxxx_professionalcompetition.Contains("Международный"))
                     {
                         ws.Cell(counter, 14).SetValue<string>("Да");
                     }
@@ -2194,8 +2192,8 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
     <filter type='and'>
       <filter type='and'>
         <filter type='or'>
-          <condition attribute='ntrlab_class' operator='eq' value='1' />
-          <condition attribute='ntrlab_class' operator='eq' value='2' />
+          <condition attribute='xxxxx_class' operator='eq' value='1' />
+          <condition attribute='xxxxx_class' operator='eq' value='2' />
         </filter>
         {0}
       </filter>
@@ -2243,8 +2241,8 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
   <entity name='contact'>
     <attribute name='fullname' />
     <attribute name='contactid' />
-    <attribute name='ntrlab_science_rating' />
-    <attribute name='ntrlab_premium' />
+    <attribute name='xxxxx_science_rating' />
+    <attribute name='xxxxx_premium' />
     <order attribute='fullname' descending='false' />
     <filter type='and'>
       <condition attribute='statecode' operator='eq' value='0' />
@@ -2274,7 +2272,7 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
   <entity name='contact'>
     <attribute name='fullname' />
     <attribute name='contactid' />
-    <attribute name='ntrlab_rating' />
+    <attribute name='xxxxx_rating' />
     <order attribute='fullname' descending='false' />
     <filter type='and'>
       <condition attribute='statecode' operator='eq' value='0' />
@@ -2363,19 +2361,19 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
             <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
         </filter>
     </link-entity>
-    <link-entity name='ntrlab_publicevents_participation' from='ntrlab_teacher' to='contactid' alias='dl'>
-      <attribute name='ntrlab_theme' />
-      <attribute name='ntrlab_date' />
-      <attribute name='ntrlab_type' />
-      <attribute name='ntrlab_name' />
-      <attribute name='ntrlab_status' />
-      <attribute name='ntrlab_city' />
-      <attribute name='ntrlab_organizer' />
-      <attribute name='ntrlab_url' />
+    <link-entity name='xxxxx_publicevents_participation' from='xxxxx_teacher' to='contactid' alias='dl'>
+      <attribute name='xxxxx_theme' />
+      <attribute name='xxxxx_date' />
+      <attribute name='xxxxx_type' />
+      <attribute name='xxxxx_name' />
+      <attribute name='xxxxx_status' />
+      <attribute name='xxxxx_city' />
+      <attribute name='xxxxx_organizer' />
+      <attribute name='xxxxx_url' />
       <filter type='and'>
         {1}
       </filter>
-      <link-entity name='k2it_country' from='k2it_countryid' to='ntrlab_country' alias='dx' link-type='outer'>
+      <link-entity name='k2it_country' from='k2it_countryid' to='xxxxx_country' alias='dx' link-type='outer'>
         <attribute name='k2it_name' />
       </link-entity>
     </link-entity>
@@ -2396,16 +2394,16 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
             <condition attribute='k2it_department' operator='eq' uitype='k2it_department' value='{{{0}}}' />
         </filter>
     </link-entity>
-    <link-entity name='ntrlab_professionalcompetition' from='ntrlab_teacher' to='contactid' alias='dk'>
-      <attribute name='ntrlab_year' />
-      <attribute name='ntrlab_status' />
-      <attribute name='ntrlab_name' />
-      <attribute name='ntrlab_founder' />
-      <attribute name='ntrlab_result' />
+    <link-entity name='xxxxx_professionalcompetition' from='xxxxx_teacher' to='contactid' alias='dk'>
+      <attribute name='xxxxx_year' />
+      <attribute name='xxxxx_status' />
+      <attribute name='xxxxx_name' />
+      <attribute name='xxxxx_founder' />
+      <attribute name='xxxxx_result' />
       <filter type='and'>
         {1}
       </filter>
-      <link-entity name='k2it_country' from='k2it_countryid' to='ntrlab_country' alias='dx' link-type='outer'>
+      <link-entity name='k2it_country' from='k2it_countryid' to='xxxxx_country' alias='dx' link-type='outer'>
         <attribute name='k2it_name' />
       </link-entity>
     </link-entity>
@@ -2428,17 +2426,17 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
     </link-entity>
     <link-entity name='k2it_teacher_honorary_title' from='k2it_teacher' to='contactid' alias='cz'>
       <attribute name='k2it_year' />
-      <attribute name='ntrlab_fullname_text' />
-      <attribute name='ntrlab_class' />
-      <attribute name='ntrlab_form' />
-      <attribute name='ntrlab_founder_text' />
+      <attribute name='xxxxx_fullname_text' />
+      <attribute name='xxxxx_class' />
+      <attribute name='xxxxx_form' />
+      <attribute name='xxxxx_founder_text' />
       <attribute name='k2it_country' />
       <attribute name='k2it_description' />
-      <attribute name='ntrlab_honorary_title' />
+      <attribute name='xxxxx_honorary_title' />
       <filter type='and'>
         {1}
       </filter>
-      <link-entity name='k2it_country' from='k2it_countryid' to='ntrlab_country' alias='cx' link-type='outer'>
+      <link-entity name='k2it_country' from='k2it_countryid' to='xxxxx_country' alias='cx' link-type='outer'>
         <attribute name='k2it_name' />
       </link-entity>
     </link-entity>
@@ -2530,14 +2528,14 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
         <link-entity name='k2it_department' from='k2it_departmentid' to='k2it_department' alias='ag' link-type='outer'>
             <attribute name='k2it_name' />
             <filter type='and'>
-              <condition attribute='ntrlab_science_department' operator='eq' value='1' />
+              <condition attribute='xxxxx_science_department' operator='eq' value='1' />
             </filter>
         </link-entity>
     </link-entity>
     <link-entity name='k2it_teacher_academic_advising' from='k2it_teacher' to='contactid' alias='ca'>
         <attribute name='k2it_academic_status' />
         <attribute name='k2it_type' />
-        <attribute name='ntrlab_date' />
+        <attribute name='xxxxx_date' />
         <attribute name='k2it_theme' />
         <attribute name='k2it_description' />
         <attribute name='k2it_department' />
@@ -2583,17 +2581,17 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
             <attribute name='k2it_language' />
             <attribute name='k2it_doi' />
             <attribute name='k2it_has_signature' />
-            <attribute name='ntrlab_reviewers' />
+            <attribute name='xxxxx_reviewers' />
             <attribute name='k2it_page_count' />
             <attribute name='k2it_list_count' />
             <attribute name='k2it_vak' />
             <attribute name='k2it_is_rinc' />
             <attribute name='k2it_journal_index' />
             <attribute name='k2it_scopus' />
-            <attribute name='ntrlab_quartile_scopus' />
+            <attribute name='xxxxx_quartile_scopus' />
             <attribute name='k2it_wos' />
-            <attribute name='ntrlab_quartile_wos' />
-            <attribute name='ntrlab_elibrary' />
+            <attribute name='xxxxx_quartile_wos' />
+            <attribute name='xxxxx_elibrary' />
             <attribute name='k2it_repec' />
             <attribute name='k2it_rsci_core_collection' />
             <attribute name='k2it_erich' />
@@ -2654,17 +2652,17 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
             <attribute name='k2it_language' />
             <attribute name='k2it_doi' />
             <attribute name='k2it_has_signature' />
-            <attribute name='ntrlab_reviewers' />
+            <attribute name='xxxxx_reviewers' />
             <attribute name='k2it_page_count' />
             <attribute name='k2it_list_count' />
             <attribute name='k2it_vak' />
             <attribute name='k2it_is_rinc' />
             <attribute name='k2it_journal_index' />
             <attribute name='k2it_scopus' />
-            <attribute name='ntrlab_quartile_scopus' />
+            <attribute name='xxxxx_quartile_scopus' />
             <attribute name='k2it_wos' />
-            <attribute name='ntrlab_quartile_wos' />
-            <attribute name='ntrlab_elibrary' />
+            <attribute name='xxxxx_quartile_wos' />
+            <attribute name='xxxxx_elibrary' />
             <attribute name='k2it_repec' />
             <attribute name='k2it_rsci_core_collection' />
             <attribute name='k2it_erich' />
@@ -2699,7 +2697,7 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
   <entity name='contact'>
     <attribute name='fullname' />
     <attribute name='contactid' />
-    <attribute name='ntrlab_ras_level' />
+    <attribute name='xxxxx_ras_level' />
     <order attribute='fullname' descending='false' />
     <filter type='and'>
       <condition attribute='statecode' operator='eq' value='0' />
@@ -2749,18 +2747,18 @@ namespace K2IT.ranepa.Profiles.Controls.WebParts.wpReports
 
         //Получение статуса в сущности профессиональные конкурсы
         private const string _professionalcompetitionQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
-  <entity name='ntrlab_professionalcompetition'>
-    <attribute name='ntrlab_professionalcompetitionid' />
-    <attribute name='ntrlab_name' />
-    <attribute name='ntrlab_status' />
+  <entity name='xxxxx_professionalcompetition'>
+    <attribute name='xxxxx_professionalcompetitionid' />
+    <attribute name='xxxxx_name' />
+    <attribute name='xxxxx_status' />
     <attribute name='createdon' />
-    <order attribute='ntrlab_name' descending='false' />
+    <order attribute='xxxxx_name' descending='false' />
     <filter type='and'>
       <filter type='and'>
-        <condition attribute='ntrlab_teacher' operator='eq' uitype='contact' value='{{{0}}}' />
+        <condition attribute='xxxxx_teacher' operator='eq' uitype='contact' value='{{{0}}}' />
         <filter type='or'>
-          <condition attribute='ntrlab_status' operator='eq' value='2' />
-          <condition attribute='ntrlab_status' operator='eq' value='3' />
+          <condition attribute='xxxxx_status' operator='eq' value='2' />
+          <condition attribute='xxxxx_status' operator='eq' value='3' />
         </filter>
       </filter>
     </filter>
