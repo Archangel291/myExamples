@@ -7,13 +7,12 @@ using Microsoft.SharePoint.Administration;
 using Microsoft.SharePoint;
 using System.IO;
 using Microsoft.Xrm.Sdk;
-using NTRLab.Ranepa.TimerJobs.Helpers;
 using System.Text.RegularExpressions;
 using System.IO.Compression;
 using ClosedXML.Excel;
 using System.Globalization;
 
-namespace NTRLab.Ranepa.TimerJobs
+namespace xxxxx
 {
     class AttestationListJob : SPJobDefinition
     {
@@ -202,14 +201,6 @@ namespace NTRLab.Ranepa.TimerJobs
             {
                 ws.Cell(counter, 1).SetValue<string>(cont.FullName);
                 ws.Cell(counter, 2).SetValue<string>(getAliasedValue(cont, "ac.k2it_positionnametext"));
-                ws.Cell(counter, 3).SetValue<string>(cont.ntrlab_attlist_download_date != null ? cont.ntrlab_attlist_download_date.Value.ToString() : "");
-                ws.Cell(counter, 4).SetValue<string>(cont.ntrlab_kpk_old != null ? double.Parse(cont.ntrlab_kpk_old.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) :"");
-                ws.Cell(counter, 5).SetValue<string>(cont.ntrlab_knk_old != null ? double.Parse(cont.ntrlab_knk_old.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
-                ws.Cell(counter, 6).SetValue<string>(cont.ntrlab_knpk_old != null ? double.Parse(cont.ntrlab_knpk_old.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
-                ws.Cell(counter, 7).SetValue<string>(cont.ntrlab_attlist_download_date_old != null ? cont.ntrlab_attlist_download_date_old.Value.ToString() : "");
-                ws.Cell(counter, 8).SetValue<string>(cont.ntrlab_kpk != null ? double.Parse(cont.ntrlab_kpk.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
-                ws.Cell(counter, 9).SetValue<string>(cont.ntrlab_knk != null ? double.Parse(cont.ntrlab_knk.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
-                ws.Cell(counter, 10).SetValue<string>(cont.ntrlab_knpk != null ? double.Parse(cont.ntrlab_knpk.Value.ToString()).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
                 ws.Cell(counter, 11).SetValue<string>(getFormattedValue(cont, "ac.k2it_employment_type"));
                 ws.Cell(counter, 12).SetValue<string>(getAliasedValue(cont, "ac.k2it_rate") != "" ? double.Parse(getAliasedValue(cont, "ac.k2it_rate")).ToString("G", CultureInfo.CreateSpecificCulture("ru-RU")) : "");
                 ws.Cell(counter, 13).SetValue<string>(getAliasedValue(cont, "ag.k2it_name"));
@@ -307,14 +298,6 @@ namespace NTRLab.Ranepa.TimerJobs
         private const string _departmentQuery = @"<fetch version='1.0' output-format='xml-platform' mapping='logical' distinct='true'>
   <entity name='contact'>
     <attribute name='fullname' />
-    <attribute name='ntrlab_kpk' />
-    <attribute name='ntrlab_knk' />
-    <attribute name='ntrlab_knpk' />
-    <attribute name='ntrlab_kpk_old' />
-    <attribute name='ntrlab_knk_old' />
-    <attribute name='ntrlab_knpk_old' />
-    <attribute name='ntrlab_attlist_download_date' />
-    <attribute name='ntrlab_attlist_download_date_old' />
     <attribute name='contactid' />
     <order attribute='fullname' descending='false' />
     <filter type='and'>
